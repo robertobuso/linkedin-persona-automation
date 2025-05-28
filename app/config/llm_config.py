@@ -72,7 +72,7 @@ class LLMConfigManager:
         if anthropic_api_key:
             self.providers[LLMProvider.ANTHROPIC] = LLMConfig(
                 provider=LLMProvider.ANTHROPIC,
-                model_name=os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229"),
+                model_name=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
                 api_key=anthropic_api_key,
                 max_tokens=int(os.getenv("ANTHROPIC_MAX_TOKENS", "4000")),
                 temperature=float(os.getenv("ANTHROPIC_TEMPERATURE", "0.7")),

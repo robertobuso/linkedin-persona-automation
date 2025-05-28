@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -17,6 +15,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - app-network
 
   # Redis for Celery
   redis:
@@ -30,39 +30,106 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - app-network
+
+  # Main FastAPI Application
+  app:
+    build:
+      context: .  
+      dockerfile: ./backend/Dockerfile 
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/linkedin_automation
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - PYTHONPATH=/app 
+      - POSTGRES_USER=postgres
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app          
+      - ./backend:/app/backend  
+      - ./alembic:/app/alembic  
+      - ./alembic.ini:/app/alembic.ini 
+    restart: unless-stopped
+    entrypoint: ["/app/backend/entrypoint.sh"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    networks:
+      - app-network
+
+  # Frontend (Nginx + React)
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+      - "3000:80"  # Alternative port for development
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - app-network
 
   # Celery Worker
   celery-worker:
-    build: .
-    command: celery -A app.core.celery_app worker --loglevel=info
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    command: celery -A app.core.celery_app worker --loglevel=info 
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/linkedin_automation
       - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - PYTHONPATH=/app # To find the 'app' package for your Python code
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./app:/app/app
+      - ./backend:/app/backend
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     restart: unless-stopped
+    networks:
+      - app-network
 
   # Celery Beat (Scheduler)
   celery-beat:
-    build: .
-    command: celery -A app.core.celery_app beat --loglevel=info
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    command: celery -A app.core.celery_app beat --loglevel=info # This path needs to be correct
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/linkedin_automation
       - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - PYTHONPATH=/app # To find the 'app' package for your Python code
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./app:/app/app
+      - ./backend:/app/backend
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  app-network:
+    driver: bridge

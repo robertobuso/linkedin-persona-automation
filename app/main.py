@@ -7,10 +7,11 @@ and application lifecycle management.
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
@@ -23,13 +24,18 @@ from app.core.middleware import (
     RequestLoggingMiddleware, 
     SecurityHeadersMiddleware
 )
+# from app.core.config import get_settings
 from app.core.security import get_current_user
-from app.database.connection import init_database, close_database
+from app.database.connection import init_database, close_database, run_migrations
+from app.api.v1.router import api_router
 from app.utils.exceptions import (
+    get_http_status_code, 
+    format_error_response,
     ContentNotFoundError,
     InvalidCredentialsError,
+    ValidationError,
     RateLimitExceededError,
-    ValidationError
+    LinkedInAutomationError
 )
 
 # Configure logging
@@ -39,52 +45,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager for startup and shutdown events.
-    
-    Args:
-        app: FastAPI application instance
-    """
-    # Startup
-    logger.info("Starting LinkedIn Automation API")
+    logger.info("Starting LinkedIn Automation Application...")
     try:
-        await init_database()
-        logger.info("Database initialized successfully")
+        logger.info("Initializing database connection...")
+        await init_database() # This just initializes db_manager
+        # No need to call run_migrations() here if entrypoint.sh does it
+        logger.info("Application startup completed successfully (migrations handled by entrypoint).")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {str(e)}")
+        logger.error(f"Failed to start application: {str(e)}", exc_info=True)
         raise
     
     yield
     
-    # Shutdown
-    logger.info("Shutting down LinkedIn Automation API")
-    try:
-        await close_database()
-        logger.info("Database connections closed")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {str(e)}")
-
-
+    logger.info("Shutting down application...")
+    await close_database()
+    logger.info("Application shutdown completed")
+    
 # Create FastAPI application
 app = FastAPI(
-    title="LinkedIn Automation API",
+    title="LinkedIn Presence Automation API",
+    description="Automated LinkedIn content creation and posting system",
     version="1.0.0",
-    description="REST API for LinkedIn Presence Automation System",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
     lifespan=lifespan
 )
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -169,6 +163,31 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
         }
     )
 
+@app.exception_handler(LinkedInAutomationError)
+async def automation_exception_handler(request: Request, exc: LinkedInAutomationError):
+    """Handle custom LinkedIn automation exceptions."""
+    status_code = get_http_status_code(exc)
+    error_response = format_error_response(exc)
+    
+    logger.error(f"Application error: {exc.message} - {exc.error_code}")
+    
+    return JSONResponse(
+        status_code=status_code,
+        content=error_response
+    )
+
+@app.exception_handler(SQLAlchemyError)
+async def database_exception_handler(request: Request, exc: SQLAlchemyError):
+    """Handle database errors."""
+    logger.error(f"Database error: {str(exc)}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "DATABASE_ERROR",
+            "message": "A database error occurred"
+        }
+    )
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):

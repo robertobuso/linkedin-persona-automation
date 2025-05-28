@@ -5,6 +5,7 @@ Provides specialized database operations for ContentSource, ContentItem, and Pos
 models including content processing, draft management, and scheduling operations.
 """
 
+import logging
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, timedelta
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.content import ContentSource, ContentItem, PostDraft, ContentStatus, DraftStatus
 from app.repositories.base import BaseRepository, NotFoundError, DuplicateError
 
+logger = logging.getLogger(__name__)
 
 class ContentSourceRepository(BaseRepository[ContentSource]):
     """Repository for ContentSource model with source management operations."""
@@ -276,27 +278,33 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         Returns:
             Updated ContentItem instance or None if not found
         """
-        update_data = {"status": status}
-        
-        if status == ContentStatus.PROCESSED:
-            update_data["processed_at"] = datetime.utcnow()
-        
-        if ai_analysis:
-            update_data["ai_analysis"] = ai_analysis
-        
-        if relevance_score is not None:
-            update_data["relevance_score"] = relevance_score
-        
-        if error_message:
-            update_data["error_message"] = error_message
-        
-        return await self.update(item_id, **update_data)
+        try:
+            update_data = {
+                "status": status,
+                "updated_at": datetime.utcnow()
+            }
+            
+            if ai_analysis is not None:
+                update_data["ai_analysis"] = ai_analysis
+            
+            if relevance_score is not None:
+                update_data["relevance_score"] = relevance_score
+            
+            if error_message is not None:
+                update_data["error_message"] = error_message
+            
+            return await self.update(item_id, **update_data)
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to update processing status: {str(e)}")
+            raise
     
     async def get_high_relevance_items(
         self,
         user_id: Optional[UUID] = None,
         min_score: int = 70,
-        limit: int = 20
+        limit: int = 20,
+        offset: int = 0 
     ) -> List[ContentItem]:
         """
         Get content items with high relevance scores.
@@ -309,23 +317,29 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         Returns:
             List of high-relevance ContentItem instances
         """
-        stmt = (
-            select(ContentItem)
-            .where(
-                and_(
-                    ContentItem.status == ContentStatus.PROCESSED,
-                    ContentItem.relevance_score >= min_score
+        try:
+            # Join with ContentSource to filter by user
+            stmt = (
+                select(ContentItem)
+                .join(ContentSource)
+                .where(
+                    and_(
+                        ContentSource.user_id == user_id,
+                        ContentItem.relevance_score >= min_score,
+                        ContentItem.status == ContentStatus.PROCESSED
+                    )
                 )
+                .order_by(ContentItem.relevance_score.desc(), ContentItem.created_at.desc())
+                .offset(offset)  # FIX: Apply offset
+                .limit(limit)
             )
-            .order_by(ContentItem.relevance_score.desc())
-            .limit(limit)
-        )
-        
-        if user_id:
-            stmt = stmt.join(ContentSource).where(ContentSource.user_id == user_id)
-        
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+            
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to get high relevance items: {str(e)}")
+            raise
 
 
 class PostDraftRepository(BaseRepository[PostDraft]):

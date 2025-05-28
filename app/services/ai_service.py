@@ -14,10 +14,10 @@ import json
 import time
 from dataclasses import dataclass
 
-from langchain.llms import OpenAI
+from langchain_community.llms import OpenAI
 from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
-from langchain.callbacks import get_openai_callback
+from langchain_community.callbacks.manager import get_openai_callback
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 

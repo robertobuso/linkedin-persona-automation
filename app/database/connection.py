@@ -10,8 +10,9 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool, QueuePool
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 import logging
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,8 @@ class DatabaseManager:
     """
     
     def __init__(self):
-        self.engine: Optional[object] = None
-        self.session_factory: Optional[async_sessionmaker] = None
+        self.engine: Optional[create_async_engine] = None # Corrected type hint
+        self.session_factory: Optional[async_sessionmaker[AsyncSession]] = None # Corrected type hint
         self._initialized = False
     
     def initialize(
@@ -83,60 +84,48 @@ class DatabaseManager:
             database_url,
             echo=echo,
             poolclass=poolclass,
-            pool_size=pool_size,
-            max_overflow=max_overflow,
-            pool_pre_ping=True,  # Validate connections before use
-            pool_recycle=3600,   # Recycle connections after 1 hour
+            pool_size=pool_size if poolclass == QueuePool else 0,
+            max_overflow=max_overflow if poolclass == QueuePool else 0,
+            pool_pre_ping=True,
+            pool_recycle=3600,
         )
         
-        # Create session factory
         self.session_factory = async_sessionmaker(
             bind=self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
-            autoflush=True,
+            autoflush=False, # Typically False for async sessions unless you need specific autoflush behavior
             autocommit=False
         )
-        
         self._initialized = True
         logger.info("Database manager initialized successfully")
     
+    @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """
-        Get an async database session with proper cleanup.
-        
-        Yields:
-            AsyncSession: Database session for executing queries
-            
-        Raises:
-            RuntimeError: If database manager is not initialized
-        """
-        if not self._initialized or self.session_factory is None:
+        if not self._initialized or not self.session_factory: # Check session_factory too
             raise RuntimeError("Database manager not initialized. Call initialize() first.")
         
-        async with self.session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                await session.close()
-    
+        session: AsyncSession = self.session_factory() # Create a session
+        try:
+            yield session
+            await session.commit() # Commit at the end of the 'with' block if no exceptions
+        except Exception:
+            await session.rollback() # Rollback on any exception
+            raise
+        finally:
+            await session.close() # Ensure session is closed
+
     async def close(self) -> None:
-        """Close the database engine and cleanup resources."""
         if self.engine:
             await self.engine.dispose()
             logger.info("Database engine closed")
-        
         self._initialized = False
 
 
 # Global database manager instance
 db_manager = DatabaseManager()
 
-
+@asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Dependency function to get database session for dependency injection.
@@ -144,7 +133,8 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession: Database session for executing queries
     """
-    async with db_manager.get_session() as session:
+    # FIX: Use the proper async generator delegation
+    async with db_manager.get_session() as session: 
         yield session
 
 
@@ -174,19 +164,44 @@ async def init_database() -> None:
     - DATABASE_MAX_OVERFLOW: Max overflow connections (default: 30)
     - DEBUG: Enable SQL query logging (default: False)
     """
+    logger.info("Initializing database manager for FastAPI app...")
     database_url = get_database_url()
     pool_size = int(os.getenv("DATABASE_POOL_SIZE", "20"))
     max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "30"))
-    echo = os.getenv("DEBUG", "False").lower() == "true"
+    echo_db = os.getenv("DEBUG", "False").lower() == "true" # For FastAPI, echo if DEBUG is true
     
     db_manager.initialize(
         database_url=database_url,
         pool_size=pool_size,
         max_overflow=max_overflow,
-        echo=echo
+        echo=echo_db
     )
+    
+    # FIX: Add database table creation
+    # from app.models import user, content  # Import all models
+    # async with db_manager.get_session() as session:
+    #     async with session.begin():
+    #         # Create all tables
+    #         await session.run_sync(Base.metadata.create_all, db_manager.engine.sync_engine)
+    
+    # logger.info("Database tables created/verified")
+
+    # Optional: Test the connection after initialization
+    try:
+        async with db_manager.get_session() as session:
+            await session.execute(text("SELECT 1"))
+        logger.info("Database session acquisition and test query successful during init.")
+    except Exception as e:
+        logger.error(f"Database session test failed during init: {e}", exc_info=True)
+        raise # If the DB isn't really ready, the app shouldn't start
 
 
 async def close_database() -> None:
     """Close database connections and cleanup resources."""
     await db_manager.close()
+
+
+async def run_migrations(): # If you still want this function for some reason
+    logger.info("Database migrations are expected to be handled by the entrypoint script.")
+    # You could add a check here if needed, e.g., verify alembic_version table
+    pass

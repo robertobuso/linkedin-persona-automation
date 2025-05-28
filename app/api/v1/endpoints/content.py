@@ -6,7 +6,7 @@ and triggering content ingestion processes.
 """
 
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
@@ -90,9 +90,9 @@ async def create_content_source(
             content_filters=source_data.content_filters
         )
         
-        # Trigger initial content fetch in background
+        # FIX: Use FastAPI background tasks instead of Celery
         background_tasks.add_task(
-            process_source_task.delay,
+            _process_source_background,
             str(source.id)
         )
         
@@ -204,10 +204,10 @@ async def update_content_source(
 
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_content_source(
-    source_id: str,
+    source_id: str, # Ensure this matches your model's ID type
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session)
-) -> Any:
+) -> Response:
     """
     Delete a content source.
     
@@ -232,12 +232,25 @@ async def delete_content_source(
         )
     
     try:
-        await source_repo.delete(source_id)
+        await source_repo.delete(source_id) # Assuming delete doesn't return a value
+        return Response(status_code=status.HTTP_204_NO_CONTENT) # Return a Response object with no body
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete content source: {str(e)}"
         )
+
+async def _process_source_background(source_id: str):
+    """Background task to process content source."""
+    try:
+        async with get_db_session() as session:
+            ingestion_service = ContentIngestionService(session)
+            from uuid import UUID
+            source_uuid = UUID(source_id)
+            result = await ingestion_service.process_source_by_id(source_uuid)
+            logging.info(f"Background processing completed for source {source_id}: {result.to_dict()}")
+    except Exception as e:
+        logging.error(f"Background processing failed for source {source_id}: {str(e)}")
 
 
 @router.get("/feed", response_model=List[ContentItemResponse])
@@ -281,10 +294,11 @@ async def get_content_feed(
             offset=offset
         )
     else:
-        # Get high relevance items for user
+        # FIX: Add offset parameter to high relevance items
         items = await content_repo.get_high_relevance_items(
             user_id=current_user.id,
-            limit=limit
+            limit=limit,
+            offset=offset  # Added missing offset
         )
     
     return [ContentItemResponse.from_orm(item) for item in items]

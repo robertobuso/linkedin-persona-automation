@@ -39,3 +39,11 @@ langdetect>=1.0.9
 
 # LangChain dependencies
 langchain-community
+
+# Missing dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.0.0
+python-multipart>=0.0.6

@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python virtual environments
+.venv
+venv/
+env/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Sensitive files
+.env
+*.log
+celerybeat-schedule
+celerybeat.pid
+
+# IDE / Editor specific
+.idea/
+.vscode/
+.spyderproject
+.ropeproject
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+# tests/  # Uncomment if you don't want tests in the final image
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Docker files (don't copy themselves if using COPY .)
+Dockerfile
+docker-compose.yml
+# Add other docker-compose-*.yml if you have them
+
+# Project docs not needed at runtime
+README.md
+# Add other documentation files
+
+# Other caches
+.cache
+.mypy_cache/
+.ruff_cache/

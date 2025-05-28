@@ -5,7 +5,7 @@ Provides endpoints for analytics dashboards, performance metrics,
 and recommendation insights.
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 

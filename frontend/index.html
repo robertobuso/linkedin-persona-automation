@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Automation MVP</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+    
+    <!-- Load configuration -->
+    <script src="/config.js"></script>
+    
+    <!-- React CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        /* Add loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0077b5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Add toast notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-left: 4px solid #28a745;
+        }
+
+        .toast.error {
+            border-left: 4px solid #dc3545;
+        }
+
+        .app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #0077b5;
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: #0077b5;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #005885;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: #333;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .auth-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 80vh;
+        }
+
+        .auth-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .auth-card h2 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #0077b5;
+        }
+
+        .alert {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            height: fit-content;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .content-area {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-menu {
+            list-style: none;
+        }
+
+        .nav-menu li {
+            margin-bottom: 0.5rem;
+        }
+
+        .nav-menu a {
+            display: block;
+            padding: 0.75rem;
+            text-decoration: none;
+            color: #555;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            background: #f8f9fa;
+            color: #0077b5;
+            transform: translateX(4px);
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #e9ecef;
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h3 {
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+
+        .card p {
+            color: #666;
+            margin-bottom: 1rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .tag {
+            display: inline-block;
+            background: #e9ecef;
+            color: #495057;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-right: 0.25rem;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #666;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .header {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; color: white;">
+            <div class="loading-spinner" style="width: 40px; height: 40px; border-width: 4px;"></div>
+            <p style="margin-top: 1rem;">Loading LinkedIn Automation...</p>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // API Configuration
+        // Use configuration from window.APP_CONFIG
+        const API_BASE = window.APP_CONFIG?.API_BASE_URL || '/api/v1';
+
+        // Toast notification system
+        const ToastContext = React.createContext();
+
+        const ToastProvider = ({ children }) => {
+            const [toasts, setToasts] = useState([]);
+
+            const addToast = (message, type = 'info') => {
+                const id = Date.now();
+                const toast = { id, message, type };
+                setToasts(prev => [...prev, toast]);
+                
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    setToasts(prev => prev.filter(t => t.id !== id));
+                }, 5000);
+            };
+
+            const removeToast = (id) => {
+                setToasts(prev => prev.filter(t => t.id !== id));
+            };
+
+            return (
+                <ToastContext.Provider value={{ addToast }}>
+                    {children}
+                    <div style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 1000 }}>
+                        {toasts.map(toast => (
+                            <div
+                                key={toast.id}
+                                className={`toast show ${toast.type}`}
+                                onClick={() => removeToast(toast.id)}
+                                style={{ cursor: 'pointer', marginBottom: '10px' }}
+                            >
+                                {toast.message}
+                            </div>
+                        ))}
+                    </div>
+                </ToastContext.Provider>
+            );
+        };
+
+        // API Helper with toast notifications
+        const useApi = () => {
+            const { addToast } = React.useContext(ToastContext);
+
+            const apiCall = useCallback(async (endpoint, options = {}) => {
+                const token = localStorage.getItem('token');
+                const config = {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token && { Authorization: `Bearer ${token}` }),
+                        ...options.headers,
+                    },
+                };
+
+                try {
+                    const response = await fetch(`${API_BASE}${endpoint}`, config);
+                    
+                    if (!response.ok) {
+                        const error = await response.json().catch(() => ({ message: 'An error occurred' }));
+                        throw new Error(error.message || error.detail || 'API Error');
+                    }
+
+                    return response.json();
+                } catch (error) {
+                    addToast(error.message, 'error');
+                    throw error;
+                }
+            }, [addToast]);
+
+            return { apiCall, addToast };
+        };
+
+        // API Helper Functions
+        const apiCall = async (endpoint, options = {}) => {
+            const token = localStorage.getItem('token');
+            const config = {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token && { Authorization: `Bearer ${token}` }),
+                    ...options.headers,
+                },
+            };
+
+            const response = await fetch(`${API_BASE}${endpoint}`, config);
+            
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: 'An error occurred' }));
+                throw new Error(error.message || error.detail || 'API Error');
+            }
+
+            return response.json();
+        };
+
+        // Main App Component
+        const App = () => {
+            return (
+                <ToastProvider>
+                    <AppContent />
+                </ToastProvider>
+            );
+        };
+
+        const AppContent = () => {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const { apiCall, addToast } = useApi();
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                if (token) {
+                    apiCall('/auth/me')
+                        .then(userData => {
+                            setUser(userData);
+                            addToast('Welcome back!', 'success');
+                        })
+                        .catch(() => {
+                            localStorage.removeItem('token');
+                            setUser(null);
+                        })
+                        .finally(() => setLoading(false));
+                } else {
+                    setLoading(false);
+                }
+            }, [apiCall, addToast]);
+
+            const handleLogin = (userData, token) => {
+                localStorage.setItem('token', token);
+                setUser(userData);
+                addToast('Login successful!', 'success');
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                setUser(null);
+                addToast('Logged out successfully', 'success');
+            };
+
+            if (loading) {
+                return (
+                    <div className="app">
+                        <div className="loading">
+                            <div className="loading-spinner"></div>
+                            <h2 style={{marginTop: '1rem'}}>Loading...</h2>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="app">
+                    <Header user={user} onLogout={handleLogout} />
+                    <main className="main-content">
+                        {user ? (
+                            <Dashboard user={user} />
+                        ) : (
+                            <AuthScreen onLogin={handleLogin} />
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        // Header Component
+        const Header = ({ user, onLogout }) => (
+            <header className="header">
+                <div className="logo">LinkedIn Automation MVP</div>
+                {user && (
+                    <div className="user-menu">
+                        <span>Welcome, {user.full_name || user.email}</span>
+                        <button className="btn btn-secondary" onClick={onLogout}>
+                            Logout
+                        </button>
+                    </div>
+                )}
+            </header>
+        );
+
+        // Authentication Screen
+        const AuthScreen = ({ onLogin }) => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [formData, setFormData] = useState({
+                email: '',
+                password: '',
+                full_name: ''
+            });
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+
+                try {
+                    if (isLogin) {
+                        // Login with form data format
+                        const formBody = new URLSearchParams();
+                        formBody.append('username', formData.email);
+                        formBody.append('password', formData.password);
+
+                        const response = await fetch(`${API_BASE}/auth/login`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                            },
+                            body: formBody,
+                        });
+
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.detail || 'Login failed');
+                        }
+
+                        const data = await response.json();
+                        onLogin(data.user, data.access_token);
+                    } else {
+                        // Register
+                        const data = await apiCall('/auth/register', {
+                            method: 'POST',
+                            body: JSON.stringify(formData),
+                        });
+                        onLogin(data.user, data.access_token);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleChange = (e) => {
+                setFormData({
+                    ...formData,
+                    [e.target.name]: e.target.value
+                });
+            };
+
+            return (
+                <div className="auth-container">
+                    <div className="auth-card">
+                        <h2>{isLogin ? 'Login' : 'Register'}</h2>
+                        
+                        {error && (
+                            <div className="alert alert-error">{error}</div>
+                        )}
+
+                        <form onSubmit={handleSubmit}>
+                            {!isLogin && (
+                                <div className="form-group">
+                                    <label>Full Name</label>
+                                    <input
+                                        type="text"
+                                        name="full_name"
+                                        className="form-control"
+                                        value={formData.full_name}
+                                        onChange={handleChange}
+                                        required
+                                    />
+                                </div>
+                            )}
+                            
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input
+                                    type="email"
+                                    name="email"
+                                    className="form-control"
+                                    value={formData.email}
+                                    onChange={handleChange}
+                                    required
+                                />
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Password</label>
+                                <input
+                                    type="password"
+                                    name="password"
+                                    className="form-control"
+                                    value={formData.password}
+                                    onChange={handleChange}
+                                    required
+                                    minLength="8"
+                                />
+                            </div>
+                            
+                            <button 
+                                type="submit" 
+                                className="btn btn-primary" 
+                                style={{width: '100%', marginBottom: '1rem'}}
+                                disabled={loading}
+                            >
+                                {loading ? 'Loading...' : (isLogin ? 'Login' : 'Register')}
+                            </button>
+                        </form>
+
+                        <p style={{textAlign: 'center'}}>
+                            {isLogin ? "Don't have an account? " : "Already have an account? "}
+                            <button 
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => setIsLogin(!isLogin)}
+                                style={{padding: '0.25rem 0.5rem'}}
+                            >
+                                {isLogin ? 'Register' : 'Login'}
+                            </button>
+                        </p>
+                    </div>
+                </div>
+            );
+        };
+
+        // Dashboard Component
+        const Dashboard = ({ user }) => {
+            const [activeTab, setActiveTab] = useState('overview');
+
+            return (
+                <div className="dashboard">
+                    <aside className="sidebar">
+                        <h3>Navigation</h3>
+                        <ul className="nav-menu">
+                            <li>
+                                <a 
+                                    href="#" 
+                                    className={activeTab === 'overview' ? 'active' : ''}
+                                    onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}
+                                >
+                                    📊 Overview
+                                </a>
+                            </li>
+                            <li>
+                                <a 
+                                    href="#" 
+                                    className={activeTab === 'sources' ? 'active' : ''}
+                                    onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}
+                                >
+                                    📡 Content Sources
+                                </a>
+                            </li>
+                            <li>
+                                <a 
+                                    href="#" 
+                                    className={activeTab === 'feed' ? 'active' : ''}
+                                    onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}
+                                >
+                                    📰 Content Feed
+                                </a>
+                            </li>
+                            <li>
+                                <a 
+                                    href="#" 
+                                    className={activeTab === 'drafts' ? 'active' : ''}
+                                    onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}
+                                >
+                                    ✏️ Post Drafts
+                                </a>
+                            </li>
+                        </ul>
+                    </aside>
+
+                    <div className="content-area">
+                        {activeTab === 'overview' && <OverviewTab />}
+                        {activeTab === 'sources' && <SourcesTab />}
+                        {activeTab === 'feed' && <FeedTab />}
+                        {activeTab === 'drafts' && <DraftsTab />}
+                    </div>
+                </div>
+            );
+        };
+
+        // Overview Tab
+        const OverviewTab = () => {
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                // Simulate loading stats
+                setTimeout(() => {
+                    setStats({
+                        sources: 0,
+                        content_items: 0,
+                        drafts: 0,
+                        published: 0
+                    });
+                    setLoading(false);
+                }, 1000);
+            }, []);
+
+            if (loading) {
+                return <div className="loading">Loading overview...</div>;
+            }
+
+            return (
+                <div>
+                    <h2>Dashboard Overview</h2>
+                    
+                    <div className="stats">
+                        <div className="stat-card">
+                            <div className="stat-number">{stats.sources}</div>
+                            <div>Content Sources</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{stats.content_items}</div>
+                            <div>Content Items</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{stats.drafts}</div>
+                            <div>Draft Posts</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{stats.published}</div>
+                            <div>Published Posts</div>
+                        </div>
+                    </div>
+
+                    <div className="card">
+                        <h3>🚀 Getting Started</h3>
+                        <p>Welcome to your LinkedIn Automation dashboard! Here's how to get started:</p>
+                        <ol>
+                            <li>Add content sources (RSS feeds, LinkedIn profiles)</li>
+                            <li>Let the system discover and process content</li>
+                            <li>Review and generate post drafts</li>
+                            <li>Schedule or publish your posts</li>
+                        </ol>
+                        <p>Start by adding your first content source in the Sources tab!</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // Sources Tab
+        const SourcesTab = () => {
+            const [sources, setSources] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showModal, setShowModal] = useState(false);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                loadSources();
+            }, []);
+
+            const loadSources = async () => {
+                try {
+                    const data = await apiCall('/content/sources');
+                    setSources(data);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSourceAdded = (newSource) => {
+                setSources([...sources, newSource]);
+                setShowModal(false);
+            };
+
+            if (loading) {
+                return <div className="loading">Loading sources...</div>;
+            }
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Content Sources</h2>
+                        <button 
+                            className="btn btn-primary"
+                            onClick={() => setShowModal(true)}
+                        >
+                            ➕ Add Source
+                        </button>
+                    </div>
+
+                    {error && (
+                        <div className="alert alert-error">{error}</div>
+                    )}
+
+                    {sources.length === 0 ? (
+                        <div className="empty-state">
+                            <h3>No content sources yet</h3>
+                            <p>Add your first content source to start discovering content!</p>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={() => setShowModal(true)}
+                            >
+                                Add Your First Source
+                            </button>
+                        </div>
+                    ) : (
+                        <div>
+                            {sources.map(source => (
+                                <SourceCard key={source.id} source={source} />
+                            ))}
+                        </div>
+                    )}
+
+                    {showModal && (
+                        <AddSourceModal 
+                            onClose={() => setShowModal(false)}
+                            onSourceAdded={handleSourceAdded}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        // Source Card Component
+        const SourceCard = ({ source }) => (
+            <div className="card">
+                <h3>{source.name}</h3>
+                <p>{source.description}</p>
+                <div style={{marginBottom: '1rem'}}>
+                    <span className="tag">{source.source_type}</span>
+                    <span className="tag">{source.is_active ? 'Active' : 'Inactive'}</span>
+                    <span className="tag">Check every {source.check_frequency_hours}h</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                    <div>
+                        <small>Found: {source.total_items_found} | Processed: {source.total_items_processed}</small>
+                    </div>
+                    <div>
+                        <button className="btn btn-secondary">⚙️ Edit</button>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // Add Source Modal
+        const AddSourceModal = ({ onClose, onSourceAdded }) => {
+            const [formData, setFormData] = useState({
+                name: '',
+                source_type: 'rss_feed',
+                url: '',
+                description: '',
+                check_frequency_hours: 24
+            });
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+
+                try {
+                    const data = await apiCall('/content/sources', {
+                        method: 'POST',
+                        body: JSON.stringify(formData),
+                    });
+                    onSourceAdded(data);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleChange = (e) => {
+                setFormData({
+                    ...formData,
+                    [e.target.name]: e.target.value
+                });
+            };
+
+            return (
+                <div className="modal">
+                    <div className="modal-content">
+                        <div className="modal-header">
+                            <h3>Add Content Source</h3>
+                            <button className="close-btn" onClick={onClose}>×</button>
+                        </div>
+
+                        {error && (
+                            <div className="alert alert-error">{error}</div>
+                        )}
+
+                        <form onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label>Name</label>
+                                <input
+                                    type="text"
+                                    name="name"
+                                    className="form-control"
+                                    value={formData.name}
+                                    onChange={handleChange}
+                                    required
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Type</label>
+                                <select
+                                    name="source_type"
+                                    className="form-control"
+                                    value={formData.source_type}
+                                    onChange={handleChange}
+                                >
+                                    <option value="rss_feed">RSS Feed</option>
+                                    <option value="linkedin">LinkedIn Profile</option>
+                                </select>
+                            </div>
+
+                            <div className="form-group">
+                                <label>URL</label>
+                                <input
+                                    type="url"
+                                    name="url"
+                                    className="form-control"
+                                    value={formData.url}
+                                    onChange={handleChange}
+                                    required
+                                    placeholder="https://example.com/feed.xml"
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Description</label>
+                                <textarea
+                                    name="description"
+                                    className="form-control"
+                                    value={formData.description}
+                                    onChange={handleChange}
+                                    rows="3"
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Check Frequency (hours)</label>
+                                <input
+                                    type="number"
+                                    name="check_frequency_hours"
+                                    className="form-control"
+                                    value={formData.check_frequency_hours}
+                                    onChange={handleChange}
+                                    min="1"
+                                    max="168"
+                                />
+                            </div>
+
+                            <div style={{display: 'flex', gap: '1rem', justifyContent: 'flex-end'}}>
+                                <button 
+                                    type="button" 
+                                    className="btn btn-secondary"
+                                    onClick={onClose}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="submit" 
+                                    className="btn btn-primary"
+                                    disabled={loading}
+                                >
+                                    {loading ? 'Adding...' : 'Add Source'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // Feed Tab
+        const FeedTab = () => {
+            const [content, setContent] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                loadContent();
+            }, []);
+
+            const loadContent = async () => {
+                try {
+                    const data = await apiCall('/content/feed');
+                    setContent(data);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading) {
+                return <div className="loading">Loading content...</div>;
+            }
+
+            return (
+                <div>
+                    <h2>Content Feed</h2>
+
+                    {error && (
+                        <div className="alert alert-error">{error}</div>
+                    )}
+
+                    {content.length === 0 ? (
+                        <div className="empty-state">
+                            <h3>No content found</h3>
+                            <p>Add some content sources and wait for content to be discovered!</p>
+                        </div>
+                    ) : (
+                        <div>
+                            {content.map(item => (
+                                <ContentCard key={item.id} item={item} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Content Card Component
+        const ContentCard = ({ item }) => {
+            const handleGenerateDraft = async () => {
+                try {
+                    await apiCall('/drafts', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            content_item_id: item.id
+                        }),
+                    });
+                    alert('Draft generated successfully!');
+                } catch (err) {
+                    alert('Failed to generate draft: ' + err.message);
+                }
+            };
+
+            return (
+                <div className="card">
+                    <h3>{item.title}</h3>
+                    <p>{item.content.substring(0, 200)}...</p>
+                    <div style={{marginBottom: '1rem'}}>
+                        {item.tags.map(tag => (
+                            <span key={tag} className="tag">{tag}</span>
+                        ))}
+                        {item.relevance_score && (
+                            <span className="tag">Score: {item.relevance_score}</span>
+                        )}
+                    </div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <div>
+                            <small>
+                                {item.author && `By ${item.author} • `}
+                                {item.published_at && new Date(item.published_at).toLocaleDateString()}
+                            </small>
+                        </div>
+                        <div>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={handleGenerateDraft}
+                            >
+                                ✨ Generate Draft
+                            </button>
+                            <a 
+                                href={item.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="btn btn-secondary"
+                                style={{marginLeft: '0.5rem'}}
+                            >
+                                🔗 View Original
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Drafts Tab
+        const DraftsTab = () => {
+            const [drafts, setDrafts] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                loadDrafts();
+            }, []);
+
+            const loadDrafts = async () => {
+                try {
+                    const data = await apiCall('/drafts');
+                    setDrafts(data);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleBatchGenerate = async () => {
+                try {
+                    setLoading(true);
+                    const data = await apiCall('/drafts/batch-generate', {
+                        method: 'POST',
+                    });
+                    setDrafts([...drafts, ...data]);
+                    alert(`Generated ${data.length} new drafts!`);
+                } catch (err) {
+                    alert('Failed to generate drafts: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading) {
+                return <div className="loading">Loading drafts...</div>;
+            }
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Post Drafts</h2>
+                        <button 
+                            className="btn btn-primary"
+                            onClick={handleBatchGenerate}
+                            disabled={loading}
+                        >
+                            🎯 Generate Drafts
+                        </button>
+                    </div>
+
+                    {error && (
+                        <div className="alert alert-error">{error}</div>
+                    )}
+
+                    {drafts.length === 0 ? (
+                        <div className="empty-state">
+                            <h3>No drafts yet</h3>
+                            <p>Generate drafts from your content feed or use batch generation!</p>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={handleBatchGenerate}
+                            >
+                                Generate Your First Drafts
+                            </button>
+                        </div>
+                    ) : (
+                        <div>
+                            {drafts.map(draft => (
+                                <DraftCard 
+                                    key={draft.id} 
+                                    draft={draft} 
+                                    onUpdate={loadDrafts}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Draft Card Component
+        const DraftCard = ({ draft, onUpdate }) => {
+            const [editing, setEditing] = useState(false);
+            const [content, setContent] = useState(draft.content);
+            const [loading, setLoading] = useState(false);
+
+            const handleSave = async () => {
+                try {
+                    setLoading(true);
+                    await apiCall(`/drafts/${draft.id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            content: content
+                        }),
+                    });
+                    setEditing(false);
+                    onUpdate();
+                } catch (err) {
+                    alert('Failed to save draft: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handlePublish = async () => {
+                try {
+                    setLoading(true);
+                    await apiCall(`/drafts/${draft.id}/publish`, {
+                        method: 'POST',
+                        body: JSON.stringify({}),
+                    });
+                    alert('Draft published successfully!');
+                    onUpdate();
+                } catch (err) {
+                    alert('Failed to publish draft: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleRegenerate = async () => {
+                try {
+                    setLoading(true);
+                    const data = await apiCall(`/drafts/${draft.id}/regenerate`, {
+                        method: 'POST',
+                    });
+                    setContent(data.content);
+                    onUpdate();
+                } catch (err) {
+                    alert('Failed to regenerate draft: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const getStatusColor = (status) => {
+                switch (status) {
+                    case 'draft': return '#6c757d';
+                    case 'ready': return '#28a745';
+                    case 'scheduled': return '#ffc107';
+                    case 'published': return '#007bff';
+                    case 'failed': return '#dc3545';
+                    default: return '#6c757d';
+                }
+            };
+
+            return (
+                <div className="card">
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem'}}>
+                        <h3>{draft.title || 'Untitled Draft'}</h3>
+                        <span 
+                            className="tag" 
+                            style={{
+                                background: getStatusColor(draft.status),
+                                color: 'white'
+                            }}
+                        >
+                            {draft.status.toUpperCase()}
+                        </span>
+                    </div>
+
+                    {editing ? (
+                        <div>
+                            <textarea
+                                value={content}
+                                onChange={(e) => setContent(e.target.value)}
+                                className="form-control"
+                                rows="6"
+                                style={{marginBottom: '1rem'}}
+                            />
+                            <div style={{display: 'flex', gap: '0.5rem'}}>
+                                <button 
+                                    className="btn btn-primary"
+                                    onClick={handleSave}
+                                    disabled={loading}
+                                >
+                                    💾 Save
+                                </button>
+                                <button 
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                        setEditing(false);
+                                        setContent(draft.content);
+                                    }}
+                                >
+                                    ❌ Cancel
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div>
+                            <p style={{whiteSpace: 'pre-wrap', marginBottom: '1rem'}}>
+                                {draft.content}
+                            </p>
+                            
+                            {draft.hashtags && draft.hashtags.length > 0 && (
+                                <div style={{marginBottom: '1rem'}}>
+                                    {draft.hashtags.map(tag => (
+                                        <span key={tag} className="tag">{tag}</span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                <div>
+                                    <small>
+                                        Created: {new Date(draft.created_at).toLocaleDateString()}
+                                        {draft.published_at && (
+                                            <> • Published: {new Date(draft.published_at).toLocaleDateString()}</>
+                                        )}
+                                    </small>
+                                </div>
+                                <div style={{display: 'flex', gap: '0.5rem'}}>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={() => setEditing(true)}
+                                        disabled={loading || draft.status === 'published'}
+                                    >
+                                        ✏️ Edit
+                                    </button>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={handleRegenerate}
+                                        disabled={loading || draft.status === 'published'}
+                                    >
+                                        🔄 Regenerate
+                                    </button>
+                                    {draft.status !== 'published' && (
+                                        <button 
+                                            className="btn btn-primary"
+                                            onClick={handlePublish}
+                                            disabled={loading}
+                                        >
+                                            🚀 Publish
+                                        </button>
+                                    )}
+                                    {draft.linkedin_post_url && (
+                                        <a 
+                                            href={draft.linkedin_post_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="btn btn-secondary"
+                                        >
+                                            🔗 View Post
+                                        </a>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render the app
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

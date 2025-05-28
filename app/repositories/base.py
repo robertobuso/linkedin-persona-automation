@@ -5,16 +5,19 @@ Provides generic CRUD operations and common database patterns that can be
 extended by specific model repositories.
 """
 
+import logging
 from typing import TypeVar, Generic, List, Optional, Dict, Any, Type, Union
-from uuid import UUID
+from uuid import UUID, uuid4
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import IntegrityError, OperationalError
+
 from app.database.connection import Base
 
-# Type variable for model classes
 ModelType = TypeVar("ModelType", bound=Base)
+logger = logging.getLogger(__name__)
 
 
 class DatabaseError(Exception):
@@ -74,8 +77,10 @@ class BaseRepository(Generic[ModelType]):
             stmt = select(self.model).where(self.model.id == id)
             result = await self.session.execute(stmt)
             return result.scalar_one_or_none()
-        except OperationalError as e:
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to get {self.model.__name__} by ID {id}: {str(e)}")
+            raise
     
     async def get_by_ids(self, ids: List[Union[UUID, str, int]]) -> List[ModelType]:
         """
@@ -112,17 +117,31 @@ class BaseRepository(Generic[ModelType]):
             ConnectionError: If database connection fails
         """
         try:
+            # Add ID if not provided
+            if 'id' not in kwargs:
+                kwargs['id'] = uuid4()
+            
+            # Add timestamps
+            now = datetime.utcnow()
+            if hasattr(self.model, 'created_at') and 'created_at' not in kwargs:
+                kwargs['created_at'] = now
+            if hasattr(self.model, 'updated_at') and 'updated_at' not in kwargs:
+                kwargs['updated_at'] = now
+            
             instance = self.model(**kwargs)
             self.session.add(instance)
-            await self.session.flush()
-            await self.session.refresh(instance)
+            
+            # FIX: Use explicit transaction boundary
+            await self.session.flush()  # Flush to get ID without committing
+            await self.session.refresh(instance)  # Refresh to get all fields
+            
+            logger.debug(f"Created {self.model.__name__} with ID: {instance.id}")
             return instance
-        except IntegrityError as e:
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to create {self.model.__name__}: {str(e)}")
             await self.session.rollback()
-            raise DuplicateError(f"Record already exists: {str(e)}")
-        except OperationalError as e:
-            await self.session.rollback()
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            raise
     
     async def update(self, id: Union[UUID, str, int], **kwargs) -> Optional[ModelType]:
         """
@@ -140,25 +159,32 @@ class BaseRepository(Generic[ModelType]):
             ConnectionError: If database connection fails
         """
         try:
-            stmt = (
-                update(self.model)
-                .where(self.model.id == id)
-                .values(**kwargs)
-                .returning(self.model)
-            )
-            result = await self.session.execute(stmt)
-            updated_instance = result.scalar_one_or_none()
-            
-            if updated_instance:
-                await self.session.refresh(updated_instance)
-            
-            return updated_instance
-        except IntegrityError as e:
+            # FIX: Use proper transaction boundary
+            async with self.session.begin_nested():
+                # Add updated timestamp
+                if hasattr(self.model, 'updated_at'):
+                    kwargs['updated_at'] = datetime.utcnow()
+                
+                stmt = (
+                    update(self.model)
+                    .where(self.model.id == id)
+                    .values(**kwargs)
+                    .returning(self.model)
+                )
+                
+                result = await self.session.execute(stmt)
+                updated_instance = result.scalar_one_or_none()
+                
+                if updated_instance:
+                    await self.session.refresh(updated_instance)
+                    logger.debug(f"Updated {self.model.__name__} with ID: {id}")
+                
+                return updated_instance
+                
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to update {self.model.__name__} {id}: {str(e)}")
             await self.session.rollback()
-            raise DuplicateError(f"Update violates constraints: {str(e)}")
-        except OperationalError as e:
-            await self.session.rollback()
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            raise
     
     async def delete(self, id: Union[UUID, str, int]) -> bool:
         """
@@ -174,12 +200,20 @@ class BaseRepository(Generic[ModelType]):
             ConnectionError: If database connection fails
         """
         try:
-            stmt = delete(self.model).where(self.model.id == id)
-            result = await self.session.execute(stmt)
-            return result.rowcount > 0
-        except OperationalError as e:
+            async with self.session.begin_nested():
+                stmt = delete(self.model).where(self.model.id == id)
+                result = await self.session.execute(stmt)
+                
+                deleted = result.rowcount > 0
+                if deleted:
+                    logger.debug(f"Deleted {self.model.__name__} with ID: {id}")
+                
+                return deleted
+                
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to delete {self.model.__name__} {id}: {str(e)}")
             await self.session.rollback()
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            raise
     
     async def list_all(self, limit: Optional[int] = None, offset: int = 0) -> List[ModelType]:
         """
@@ -197,13 +231,16 @@ class BaseRepository(Generic[ModelType]):
         """
         try:
             stmt = select(self.model).offset(offset)
-            if limit:
+            
+            if limit is not None:
                 stmt = stmt.limit(limit)
             
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
-        except OperationalError as e:
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to list {self.model.__name__}: {str(e)}")
+            raise
     
     async def list_with_pagination(
         self, 
@@ -288,18 +325,122 @@ class BaseRepository(Generic[ModelType]):
             # Apply filters
             if filters:
                 conditions = []
-                for field, value in filters.items():
-                    if hasattr(self.model, field):
-                        conditions.append(getattr(self.model, field) == value)
+                for key, value in filters.items():
+                    if hasattr(self.model, key):
+                        conditions.append(getattr(self.model, key) == value)
                 
                 if conditions:
                     stmt = stmt.where(and_(*conditions))
             
             result = await self.session.execute(stmt)
-            return result.scalar()
-        except OperationalError as e:
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            return result.scalar() or 0
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to count {self.model.__name__}: {str(e)}")
+            raise
     
+    async def list_with_pagination(
+        self, 
+        page: int = 1, 
+        page_size: int = 20,
+        **filters
+    ) -> Dict[str, Any]:
+        """
+        List instances with pagination information.
+        
+        Args:
+            page: Page number (1-indexed)
+            page_size: Items per page
+            **filters: Filter conditions
+            
+        Returns:
+            Dictionary with items, pagination info
+        """
+        try:
+            # Calculate offset
+            offset = (page - 1) * page_size
+            
+            # Get total count
+            total_count = await self.count(**filters)
+            
+            # Get items
+            stmt = select(self.model).offset(offset).limit(page_size)
+            
+            # Apply filters
+            if filters:
+                conditions = []
+                for key, value in filters.items():
+                    if hasattr(self.model, key):
+                        conditions.append(getattr(self.model, key) == value)
+                
+                if conditions:
+                    stmt = stmt.where(and_(*conditions))
+            
+            result = await self.session.execute(stmt)
+            items = list(result.scalars().all())
+            
+            # Calculate pagination info
+            total_pages = (total_count + page_size - 1) // page_size
+            
+            return {
+                "items": items,
+                "total_count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            }
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to paginate {self.model.__name__}: {str(e)}")
+            raise
+    
+    # Batch operations
+    async def bulk_create(self, instances_data: List[Dict[str, Any]]) -> List[ModelType]:
+        """
+        Create multiple instances in batch.
+        
+        Args:
+            instances_data: List of dictionaries with instance data
+            
+        Returns:
+            List of created instances
+        """
+        try:
+            async with self.session.begin_nested():
+                instances = []
+                now = datetime.utcnow()
+                
+                for data in instances_data:
+                    # Add ID if not provided
+                    if 'id' not in data:
+                        data['id'] = uuid4()
+                    
+                    # Add timestamps
+                    if hasattr(self.model, 'created_at') and 'created_at' not in data:
+                        data['created_at'] = now
+                    if hasattr(self.model, 'updated_at') and 'updated_at' not in data:
+                        data['updated_at'] = now
+                    
+                    instance = self.model(**data)
+                    instances.append(instance)
+                
+                self.session.add_all(instances)
+                await self.session.flush()
+                
+                # Refresh all instances
+                for instance in instances:
+                    await self.session.refresh(instance)
+                
+                logger.debug(f"Bulk created {len(instances)} {self.model.__name__} instances")
+                return instances
+                
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to bulk create {self.model.__name__}: {str(e)}")
+            await self.session.rollback()
+            raise
+
     async def exists(self, **filters) -> bool:
         """
         Check if any records exist matching the given filters.
@@ -333,22 +474,20 @@ class BaseRepository(Generic[ModelType]):
             stmt = select(self.model)
             
             # Apply filters
-            if filters:
-                conditions = []
-                for field, value in filters.items():
-                    if hasattr(self.model, field):
-                        if isinstance(value, list):
-                            conditions.append(getattr(self.model, field).in_(value))
-                        else:
-                            conditions.append(getattr(self.model, field) == value)
-                
-                if conditions:
-                    stmt = stmt.where(and_(*conditions))
+            conditions = []
+            for key, value in filters.items():
+                if hasattr(self.model, key):
+                    conditions.append(getattr(self.model, key) == value)
+            
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
             
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
-        except OperationalError as e:
-            raise ConnectionError(f"Database connection failed: {str(e)}")
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to find {self.model.__name__} by filters: {str(e)}")
+            raise
     
     async def find_one_by(self, **filters) -> Optional[ModelType]:
         """

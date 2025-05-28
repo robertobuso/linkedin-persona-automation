@@ -7,7 +7,7 @@ and draft lifecycle operations.
 
 from typing import Any, List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
@@ -102,12 +102,21 @@ async def create_draft(
     Raises:
         HTTPException: If content item not found or generation fails
     """
+    from uuid import UUID
+    try:
+        content_item_id = UUID(draft_data.content_item_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid content_item_id format"
+        )
+    
     # Verify content item exists and belongs to user's sources
     content_repo = ContentItemRepository(db)
-    content_item = await content_repo.get_by_id(draft_data.content_item_id)
+    content_item = await content_repo.get_by_id(content_item_id)
     
     if not content_item:
-        raise ContentNotFoundError(f"Content item {draft_data.content_item_id} not found")
+        raise ContentNotFoundError(f"Content item {content_item_id} not found")
     
     # Verify content item belongs to user's source
     if content_item.source.user_id != current_user.id:
@@ -117,16 +126,38 @@ async def create_draft(
         )
     
     try:
-        # Generate post draft using content generator
-        content_generator = ContentGenerator(db)
-        draft = await content_generator.generate_post_from_content(
-            content_item_id=draft_data.content_item_id,
-            user_id=current_user.id,
-            style="professional",
-            num_variations=3
-        )
-        
-        return PostDraftResponse.from_orm(draft)
+        # FIX: Add error handling for missing service
+        try:
+            content_generator = ContentGenerator(db)
+            draft = await content_generator.generate_post_from_content(
+                content_item_id=content_item_id,
+                user_id=current_user.id,
+                style="professional",
+                num_variations=3
+            )
+            return PostDraftResponse.from_orm(draft)
+            
+        except Exception as service_error:
+            # FIX: Graceful fallback if AI service fails
+            logging.error(f"AI generation failed: {str(service_error)}")
+            
+            # Create basic draft manually
+            draft_repo = PostDraftRepository(db)
+            fallback_draft = await draft_repo.create(
+                user_id=current_user.id,
+                source_content_id=content_item_id,
+                content=f"Sharing insights from: {content_item.title}\n\n{content_item.content[:500]}...",
+                hashtags=["#insight", "#sharing"],
+                title=content_item.title[:255] if content_item.title else "Generated Post",
+                status=DraftStatus.DRAFT,  # Mark as draft for manual review
+                generation_metadata={
+                    "fallback_generation": True,
+                    "original_error": str(service_error),
+                    "created_at": datetime.utcnow().isoformat()
+                }
+            )
+            
+            return PostDraftResponse.from_orm(fallback_draft)
         
     except Exception as e:
         raise HTTPException(
@@ -319,10 +350,10 @@ async def publish_draft(
 
 @router.delete("/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(
-    draft_id: str,
+    draft_id: str, # Change to UUID if your model uses it
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session)
-) -> Any:
+) -> Response: # Explicitly return a Response type
     """
     Delete a post draft.
     
@@ -335,19 +366,20 @@ async def delete_draft(
         HTTPException: If draft not found or access denied
     """
     draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id)
-    
+    draft = await draft_repo.get_by_id(draft_id) # Assuming draft_id is now UUID
+
     if not draft:
         raise ContentNotFoundError(f"Draft {draft_id} not found")
-    
+
     if draft.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
-    
+
     try:
         await draft_repo.delete(draft_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT) # Return an explicit Response
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

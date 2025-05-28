@@ -8,11 +8,23 @@ across all endpoints with comprehensive data validation.
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field, validator, EmailStr, HttpUrl
+from pydantic import BaseModel, Field, validator, EmailStr, HttpUrl, ConfigDict
 from enum import Enum
 
 
 # Authentication Schemas
+class BaseResponseModel(BaseModel):
+    """Base response model with UUID serialization."""
+    model_config = ConfigDict(
+        from_attributes=True,
+        # FIX: Ensure UUIDs are serialized as strings
+        json_encoders={
+            UUID: str,
+            datetime: lambda v: v.isoformat() if v else None
+        },
+        arbitrary_types_allowed=True
+    )
+
 class UserCreate(BaseModel):
     """Schema for user registration."""
     email: EmailStr = Field(..., description="User email address")
@@ -39,11 +51,27 @@ class UserUpdate(BaseModel):
     linkedin_profile_url: Optional[HttpUrl] = None
 
 
-class UserResponse(BaseModel):
+class UserResponse(BaseResponseModel):
     """Schema for user response data."""
     user: Dict[str, Any] = Field(..., description="User information")
     access_token: str = Field(..., description="JWT access token")
     token_type: str = Field("bearer", description="Token type")
+
+
+class UserProfileData(BaseResponseModel): # Inherit from BaseResponseModel
+    """Schema for detailed user profile information."""
+    id: UUID # Will be serialized as str by BaseResponseModel's json_encoders
+    email: EmailStr
+    full_name: Optional[str] = None
+    linkedin_profile_url: Optional[HttpUrl] = None # Use HttpUrl if it's a URL
+    is_active: bool
+    is_verified: bool
+    # For JSONB fields from your User model:
+    preferences: Dict[str, Any] # Or a more specific Pydantic model if you have one for preferences
+    tone_profile: Dict[str, Any] # Or a more specific Pydantic model
+    created_at: datetime # Will be serialized as str
+    updated_at: datetime # Will be serialized as str
+    last_login_at: Optional[datetime] = None # Will be serialized as str or None
 
 
 class Token(BaseModel):
@@ -101,10 +129,10 @@ class ContentSourceUpdate(BaseModel):
     content_filters: Optional[Dict[str, Any]] = None
 
 
-class ContentSourceResponse(BaseModel):
+class ContentSourceResponse(BaseResponseModel):
     """Schema for content source response."""
-    id: str = Field(..., description="Source ID")
-    user_id: str = Field(..., description="User ID")
+    id: str = Field(..., description="Source ID")  # Will be auto-converted from UUID
+    user_id: str = Field(..., description="User ID")  # Will be auto-converted from UUID
     name: str = Field(..., description="Source name")
     source_type: str = Field(..., description="Source type")
     url: Optional[str] = Field(None, description="Source URL")
@@ -116,11 +144,15 @@ class ContentSourceResponse(BaseModel):
     total_items_processed: int = Field(..., description="Total items processed")
     created_at: datetime = Field(..., description="Creation time")
     
-    class Config:
-        from_attributes = True
+    # FIX: Add UUID validation and conversion
+    @validator('id', 'user_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        """Convert UUID to string for JSON serialization."""
+        if isinstance(v, UUID):
+            return str(v)
+        return v
 
-
-class ContentItemResponse(BaseModel):
+class ContentItemResponse(BaseResponseModel):
     """Schema for content item response."""
     id: str = Field(..., description="Content item ID")
     source_id: str = Field(..., description="Source ID")
@@ -135,11 +167,14 @@ class ContentItemResponse(BaseModel):
     relevance_score: Optional[int] = Field(None, description="Relevance score")
     created_at: datetime = Field(..., description="Creation time")
     
-    class Config:
-        from_attributes = True
+    @validator('id', 'source_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
 
 
-class ContentIngestionResponse(BaseModel):
+class ContentIngestionResponse(BaseResponseModel):
     """Schema for content ingestion response."""
     task_id: Optional[str] = Field(None, description="Background task ID")
     status: str = Field(..., description="Ingestion status")
@@ -151,7 +186,7 @@ class FeedValidationRequest(BaseModel):
     url: HttpUrl = Field(..., description="RSS feed URL to validate")
 
 
-class FeedValidationResponse(BaseModel):
+class FeedValidationResponse(BaseResponseModel):
     """Schema for feed validation response."""
     valid: bool = Field(..., description="Whether feed is valid")
     title: Optional[str] = Field(None, description="Feed title")
@@ -160,7 +195,7 @@ class FeedValidationResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message if invalid")
 
 
-class ContentStatsResponse(BaseModel):
+class ContentStatsResponse(BaseResponseModel):
     """Schema for content statistics response."""
     total_sources: int = Field(..., description="Total content sources")
     active_sources: int = Field(..., description="Active sources")
@@ -173,7 +208,17 @@ class ContentStatsResponse(BaseModel):
 # Draft Management Schemas
 class PostDraftCreate(BaseModel):
     """Schema for creating post drafts."""
-    content_item_id: UUID = Field(..., description="Source content item ID")
+    content_item_id: str = Field(..., description="Source content item ID")  # Accept string
+    
+    @validator('content_item_id')
+    def validate_content_item_id(cls, v):
+        """Validate and convert content item ID to UUID format."""
+        try:
+            # Validate it's a valid UUID
+            UUID(v)
+            return v
+        except ValueError:
+            raise ValueError("content_item_id must be a valid UUID")
 
 
 class PostDraftUpdate(BaseModel):
@@ -185,7 +230,7 @@ class PostDraftUpdate(BaseModel):
     scheduled_for: Optional[datetime] = Field(None, description="Scheduled time")
 
 
-class PostDraftResponse(BaseModel):
+class PostDraftResponse(BaseResponseModel):
     """Schema for post draft response."""
     id: str = Field(..., description="Draft ID")
     user_id: str = Field(..., description="User ID")
@@ -208,7 +253,7 @@ class PublishRequest(BaseModel):
     scheduled_time: Optional[datetime] = Field(None, description="Optional scheduled time")
 
 
-class PublishResponse(BaseModel):
+class PublishResponse(BaseResponseModel):
     """Schema for post publishing response."""
     draft_id: str = Field(..., description="Draft ID")
     status: str = Field(..., description="Publication status")
@@ -218,7 +263,7 @@ class PublishResponse(BaseModel):
     message: str = Field(..., description="Status message")
 
 
-class DraftStatsResponse(BaseModel):
+class DraftStatsResponse(BaseResponseModel):
     """Schema for draft statistics response."""
     total_drafts: int = Field(..., description="Total drafts")
     draft: int = Field(..., description="Draft status count")
@@ -230,7 +275,7 @@ class DraftStatsResponse(BaseModel):
 
 
 # Engagement Schemas
-class EngagementOpportunityResponse(BaseModel):
+class EngagementOpportunityResponse(BaseResponseModel):
     """Schema for engagement opportunity response."""
     id: str = Field(..., description="Opportunity ID")
     target_type: str = Field(..., description="Target type")
@@ -255,7 +300,7 @@ class CommentRequest(BaseModel):
     comment_text: Optional[str] = Field(None, description="Custom comment text")
 
 
-class CommentResponse(BaseModel):
+class CommentResponse(BaseResponseModel):
     """Schema for comment creation response."""
     opportunity_id: str = Field(..., description="Opportunity ID")
     comment_text: str = Field(..., description="Generated/posted comment")
@@ -265,7 +310,7 @@ class CommentResponse(BaseModel):
     alternative_comments: List[str] = Field(default_factory=list, description="Alternative comments")
 
 
-class EngagementStatsResponse(BaseModel):
+class EngagementStatsResponse(BaseResponseModel):
     """Schema for engagement statistics response."""
     total_opportunities: int = Field(..., description="Total opportunities")
     completion_rate: float = Field(..., description="Completion rate percentage")
@@ -276,7 +321,7 @@ class EngagementStatsResponse(BaseModel):
 
 
 # Analytics Schemas
-class DashboardResponse(BaseModel):
+class DashboardResponse(BaseResponseModel):
     """Schema for analytics dashboard response."""
     metrics: Dict[str, Any] = Field(..., description="Performance metrics")
     trends: Dict[str, Any] = Field(..., description="Content trends")
@@ -285,7 +330,7 @@ class DashboardResponse(BaseModel):
     user_id: str = Field(..., description="User ID")
 
 
-class RecommendationsResponse(BaseModel):
+class RecommendationsResponse(BaseResponseModel):
     """Schema for recommendations response."""
     recommendations: List[Dict[str, Any]] = Field(..., description="Content recommendations")
     optimal_times: List[Dict[str, Any]] = Field(..., description="Optimal posting times")
@@ -293,7 +338,7 @@ class RecommendationsResponse(BaseModel):
     generated_at: datetime = Field(..., description="Generation time")
 
 
-class PerformanceMetricsResponse(BaseModel):
+class PerformanceMetricsResponse(BaseResponseModel):
     """Schema for performance metrics response."""
     user_id: str = Field(..., description="User ID")
     period_days: int = Field(..., description="Analysis period")
@@ -306,7 +351,7 @@ class PerformanceMetricsResponse(BaseModel):
     calculated_at: datetime = Field(..., description="Calculation time")
 
 
-class WeeklyReportResponse(BaseModel):
+class WeeklyReportResponse(BaseResponseModel):
     """Schema for weekly report response."""
     user_id: str = Field(..., description="User ID")
     period_start: datetime = Field(..., description="Period start")
@@ -321,7 +366,7 @@ class WeeklyReportResponse(BaseModel):
 
 
 # Error Response Schemas
-class ErrorResponse(BaseModel):
+class ErrorResponse(BaseResponseModel):
     """Schema for error responses."""
     error: str = Field(..., description="Error type")
     message: str = Field(..., description="Error message")
@@ -329,7 +374,7 @@ class ErrorResponse(BaseModel):
     timestamp: datetime = Field(..., description="Error timestamp")
 
 
-class ValidationErrorResponse(BaseModel):
+class ValidationErrorResponse(BaseResponseModel):
     """Schema for validation error responses."""
     error: str = Field("Validation Error", description="Error type")
     message: str = Field(..., description="Error message")
@@ -344,7 +389,7 @@ class PaginationParams(BaseModel):
     page_size: int = Field(20, ge=1, le=100, description="Items per page")
 
 
-class PaginatedResponse(BaseModel):
+class PaginatedResponse(BaseResponseModel):
     """Schema for paginated responses."""
     items: List[Any] = Field(..., description="Items for current page")
     total_count: int = Field(..., description="Total number of items")
@@ -356,7 +401,7 @@ class PaginatedResponse(BaseModel):
 
 
 # Health Check Schema
-class HealthCheckResponse(BaseModel):
+class HealthCheckResponse(BaseResponseModel):
     """Schema for health check response."""
     status: str = Field("healthy", description="Service status")
     timestamp: datetime = Field(..., description="Check timestamp")

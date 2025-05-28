@@ -5,10 +5,16 @@ Configures Celery with Redis broker for background task processing including
 content ingestion, processing, and scheduled discovery jobs.
 """
 
-import os
 from celery import Celery
 from celery.schedules import crontab
 from kombu import Queue
+import asyncio
+from celery.signals import worker_process_init
+from app.database.connection import db_manager, get_database_url # Import db_manager and config getter
+import os # For getenv if used directly in init
+import logging # For logging within the signal handler
+
+logger = logging.getLogger(__name__)
 
 # Create Celery instance
 celery_app = Celery("linkedin_automation")
@@ -97,3 +103,31 @@ celery_app.conf.task_annotations = {
         "on_failure": task_failure_handler,
     }
 }
+
+@worker_process_init.connect
+def init_db_on_worker_start(**kwargs):
+    """Initialize database connection when a Celery worker process starts."""
+    logger.info("Celery worker process starting, initializing database manager...")
+    try:
+        # Get database URL and other params as your db_manager.initialize expects
+        # This logic should mirror how you get params for db_manager.initialize in your main app startup
+        database_url = get_database_url() # Assuming this function correctly gets the URL
+        pool_size = int(os.getenv("DATABASE_POOL_SIZE", "20"))
+        max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "30"))
+        # Celery workers typically don't need SQL echoing like a dev FastAPI server might
+        echo_db = os.getenv("DEBUG", "False").lower() == "true" and os.getenv("CELERY_DB_ECHO", "False").lower() == "true"
+
+        if not db_manager._initialized: # Check if already initialized in this process
+            db_manager.initialize(
+                database_url=database_url,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                echo=echo_db # Control echoing for celery separately if needed
+            )
+            logger.info("Database manager initialized for Celery worker.")
+        else:
+            logger.info("Database manager already initialized for Celery worker.")
+    except Exception as e:
+        logger.error(f"Error initializing database for Celery worker: {e}", exc_info=True)
+        # Depending on severity, you might want to raise an error to stop the worker
+        # For now, we'll log and let it continue, but tasks might fail if DB isn't up.
