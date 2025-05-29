@@ -125,39 +125,25 @@ class DatabaseManager:
 # Global database manager instance
 db_manager = DatabaseManager()
 
+
+@asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    FastAPI dependency to get a database session.
-    It yields the session, and FastAPI handles the context management.
-    """
     if not db_manager._initialized or not db_manager.session_factory:
-        # Ensure db_manager is initialized (e.g., in FastAPI lifespan)
-        # This might happen if a worker/process didn't run the full init.
-        # However, init_database() should be called by the main app and workers.
-        logger.error("get_db_session called but DatabaseManager not initialized!")
-        raise RuntimeError("Database manager not initialized. Call initialize() first.")
+        raise RuntimeError("Database manager not initialized")
 
     session: AsyncSession = db_manager.session_factory()
     try:
         yield session
-        await session.commit() # Commit if no exceptions within the route handler's use of session
+        await session.commit()
     except Exception:
-        await session.rollback() # Rollback on any exception
+        await session.rollback()
         raise
     finally:
-        await session.close() # Always close the session
+        await session.close()
 
 
 def get_database_url() -> str:
-    """
-    Get database URL from environment variables with validation.
-    
-    Returns:
-        str: Database connection URL
-        
-    Raises:
-        ValueError: If DATABASE_URL is not set
-    """
+    """Get database URL from environment variables with validation."""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL environment variable is required")
@@ -165,20 +151,12 @@ def get_database_url() -> str:
 
 
 async def init_database() -> None:
-    """
-    Initialize database connection with environment configuration.
-    
-    Reads configuration from environment variables:
-    - DATABASE_URL: PostgreSQL connection string
-    - DATABASE_POOL_SIZE: Connection pool size (default: 20)
-    - DATABASE_MAX_OVERFLOW: Max overflow connections (default: 30)
-    - DEBUG: Enable SQL query logging (default: False)
-    """
+    """Initialize database connection with environment configuration."""
     logger.info("Initializing database manager for FastAPI app...")
     database_url = get_database_url()
     pool_size = int(os.getenv("DATABASE_POOL_SIZE", "20"))
     max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "30"))
-    echo_db = os.getenv("DEBUG", "False").lower() == "true" # For FastAPI, echo if DEBUG is true
+    echo_db = os.getenv("DEBUG", "False").lower() == "true"
     
     db_manager.initialize(
         database_url=database_url,
@@ -187,13 +165,10 @@ async def init_database() -> None:
         echo=echo_db
     )
 
-    # Optional: Test the connection after initialization
+    # Test the connection
     try:
-                # For a simpler test of the factory:
-        test_session = db_manager.session_factory()
-        await test_session.execute(text("SELECT 1"))
-        await test_session.commit()
-        await test_session.close()
+        async with get_db_session() as test_session:
+            await test_session.execute(text("SELECT 1"))
         logger.info("Database session factory test successful during init.")
     except Exception as e:
         logger.error(f"Database session factory test failed during init: {e}", exc_info=True)
@@ -205,7 +180,7 @@ async def close_database() -> None:
     await db_manager.close()
 
 
-async def run_migrations(): # If you still want this function for some reason
+async def run_migrations():
+    """Database migrations are expected to be handled by the entrypoint script."""
     logger.info("Database migrations are expected to be handled by the entrypoint script.")
-    # You could add a check here if needed, e.g., verify alembic_version table
     pass

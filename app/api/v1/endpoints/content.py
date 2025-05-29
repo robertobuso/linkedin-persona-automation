@@ -38,25 +38,21 @@ router = APIRouter()
 
 # Helper function for background source processing (if not using Celery for this specific one)
 async def _process_source_background(source_id_str: str):
+    """Background task with proper session management."""
     logger.info(f"Background task started for source_id: {source_id_str}")
-    if not db_manager.session_factory: # Check if DatabaseManager is initialized
-        logger.error("DB_MANAGER NOT INITIALIZED FOR BACKGROUND TASK. Call init_database() during app startup.")
-        return
-
-    session: AsyncSession = db_manager.session_factory() # Get a new session
-    try:
-        ingestion_service = ContentIngestionService(session) # Pass the actual session
-        source_uuid = UUID(source_id_str)
-        # Assuming process_source_by_id exists and handles its own commits/rollbacks if it's a long process
-        # or the service methods interact with the session such that changes are staged.
-        result = await ingestion_service.process_source_by_id(source_uuid)
-        await session.commit() # Commit changes made by ingestion_service
-        logger.info(f"Background processing completed for source {source_id_str}: {result.to_dict() if hasattr(result, 'to_dict') else result}")
-    except Exception as e:
-        await session.rollback() # Rollback on error
-        logger.error(f"Background processing failed for source {source_id_str}: {str(e)}", exc_info=True)
-    finally:
-        await session.close() # Always close the session
+    
+    # Use the database manager's context manager for background tasks
+    async with db_manager.get_session_directly() as session:
+        try:
+            ingestion_service = ContentIngestionService(session)
+            source_uuid = UUID(source_id_str)
+            result = await ingestion_service.process_source_by_id(source_uuid)
+            logger.info(f"Background processing completed for source {source_id_str}")
+        except Exception as e:
+            logger.error(f"Background processing failed for source {source_id_str}: {str(e)}", exc_info=True)
+            raise
+        finally:
+            await session.close() # Always close the session
 
 
 @router.get("/sources", response_model=List[ContentSourceResponse])
