@@ -1,4 +1,3 @@
-# app/services/enhanced_content_ingestion.py
 """
 Enhanced content ingestion service with LLM-based content selection and user preference filtering.
 
