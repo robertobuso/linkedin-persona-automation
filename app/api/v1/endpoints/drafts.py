@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user # Ensure this is correctly defined and working
-from app.database.connection import get_db_session # Your @asynccontextmanager decorated dependency
+from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager decorated dependency
 from app.repositories.content_repository import PostDraftRepository, ContentItemRepository
 from app.services.content_generator import ContentGenerator # Ensure this service is correctly implemented
 from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined and ORM compatible
@@ -39,7 +39,7 @@ async def get_drafts(
     limit: int = Query(20, ge=1, le=100, description="Number of drafts to return"),
     offset: int = Query(0, ge=0, description="Number of drafts to skip"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed for clarity
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed for clarity
 ) -> List[PostDraftResponse]: # Specific return type
     """Get user's post drafts."""
     async with db_session_cm as session: # Use async with
@@ -87,7 +87,7 @@ async def create_draft(
     draft_data: PostDraftCreate,
     # background_tasks: BackgroundTasks, # Removed if Celery is used for AI generation
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
     """Create a new post draft from content item."""
     try:
@@ -157,7 +157,7 @@ async def create_draft(
 async def get_draft(
     draft_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
     """Get a specific post draft."""
     async with db_session_cm as session:
@@ -178,7 +178,7 @@ async def update_draft(
     draft_id: UUID, # Changed to UUID
     draft_update: PostDraftUpdate,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
     """Update a post draft."""
     async with db_session_cm as session:
@@ -213,7 +213,7 @@ async def publish_draft(
     publish_request: PublishRequest,
     background_tasks: BackgroundTasks, # Keep if needed for non-Celery background tasks
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PublishResponse:
     """Publish or schedule a post draft."""
     async with db_session_cm as session:
@@ -273,7 +273,7 @@ async def publish_draft(
 async def delete_draft(
     draft_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Response:
     """Delete a post draft."""
     async with db_session_cm as session:
@@ -306,7 +306,7 @@ async def regenerate_draft_endpoint( # Renamed to avoid conflict
     style: Optional[str] = Query("professional", description="Style for regeneration"),
     preserve_hashtags: bool = Query(False, description="Preserve existing hashtags"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
     """Regenerate a post draft with new content."""
     async with db_session_cm as session:
@@ -344,7 +344,7 @@ async def regenerate_draft_endpoint( # Renamed to avoid conflict
 @router.get("/stats/summary", response_model=DraftStatsResponse)
 async def get_draft_stats(
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> DraftStatsResponse:
     """Get draft statistics summary for user."""
     async with db_session_cm as session:
@@ -365,7 +365,7 @@ async def batch_generate_drafts_endpoint( # Renamed to avoid conflict
     max_posts: int = Query(5, ge=1, le=10, description="Maximum posts to generate"),
     min_relevance_score: int = Query(70, ge=0, le=100, description="Minimum relevance score"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> List[PostDraftResponse]:
     """Generate multiple drafts from high-relevance content."""
     async with db_session_cm as session:

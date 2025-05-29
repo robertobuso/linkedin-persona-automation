@@ -15,7 +15,7 @@ import logging # For logging errors
 logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_active_user # Ensure this dependency is correctly defined
-from app.database.connection import get_db_session # Your @asynccontextmanager decorated dependency
+from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager decorated dependency
 from app.services.analytics_service import AnalyticsService # Ensure this service is correctly implemented
 from app.services.recommendation_service import RecommendationService # Ensure this service is correctly implemented
 from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined and ORM compatible where needed
@@ -35,7 +35,7 @@ router = APIRouter()
 async def get_analytics_dashboard(
     period: Optional[str] = Query("30", description="Period in days (7, 30, 90)"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> DashboardResponse: # Changed Any to specific response model
     """
     Get analytics dashboard data.
@@ -85,7 +85,7 @@ async def get_recommendations(
     min_score: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum score filter"),
     content_types: Optional[str] = Query(None, description="Comma-separated content types"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> RecommendationsResponse: # Changed Any to specific response model
     """
     Get content recommendations for user.
@@ -146,7 +146,7 @@ async def get_recommendations(
 async def get_performance_metrics(
     period_days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> PerformanceMetricsResponse: # Changed Any to specific response model
     """
     Get detailed performance metrics.
@@ -176,7 +176,7 @@ async def get_performance_metrics(
 @router.get("/weekly-report", response_model=WeeklyReportResponse)
 async def get_weekly_report(
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> WeeklyReportResponse: # Changed Any to specific response model
     """
     Get weekly performance report.
@@ -202,7 +202,7 @@ async def get_weekly_report(
 async def get_content_trends(
     period_days: int = Query(90, ge=30, le=365, description="Analysis period in days"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> Any: # Change to TrendAnalysis schema if available
     """
     Get content performance trends analysis.
@@ -226,7 +226,7 @@ async def get_content_trends(
 @router.get("/optimal-times", response_model=List[OptimalTimingResponse]) # Changed to more specific model
 async def get_optimal_posting_times(
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> List[OptimalTimingResponse]: # Changed Any to specific response model
     """
     Get optimal posting times for user.
@@ -255,7 +255,7 @@ async def track_post_performance(
     post_id: UUID, # Changed to UUID
     metrics: dict, # This should ideally be a Pydantic model for validation
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> dict: # Change to MessageResponse schema if defined
     """
     Track performance metrics for a published post.
@@ -283,7 +283,7 @@ async def track_post_performance(
 async def get_engagement_prediction(
     draft_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> EngagementPrediction: # Changed Any to specific response model
     """
     Get engagement prediction for a draft.
@@ -320,7 +320,7 @@ async def get_engagement_prediction(
 async def get_analytics_insights(
     period_days: int = Query(30, ge=7, le=90, description="Analysis period in days"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Changed variable name
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Changed variable name
 ) -> List[Any]: # Change to List[AnalyticsInsight] if schema defined
     """
     Get analytics insights and recommendations.

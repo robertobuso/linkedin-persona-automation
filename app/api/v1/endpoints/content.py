@@ -15,7 +15,7 @@ import logging # For logging in background task
 logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_active_user # Make sure this dependency is correctly defined and working
-from app.database.connection import get_db_session, db_manager # This is your @asynccontextmanager decorated dependency
+from app.database.connection import get_db_session, db_manager, AsyncSessionContextManager # This is your @asynccontextmanager decorated dependency
 from app.repositories.content_repository import ContentSourceRepository, ContentItemRepository
 from app.services.content_ingestion import ContentIngestionService # Ensure this service is correctly implemented
 from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined
@@ -58,7 +58,7 @@ async def _process_source_background(source_id_str: str):
 @router.get("/sources", response_model=List[ContentSourceResponse])
 async def get_content_sources(
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> List[ContentSourceResponse]:
     """Get user's content sources."""
     async with db_session_cm as session:
@@ -72,7 +72,7 @@ async def create_content_source(
     source_data: ContentSourceCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Injected context manager
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Injected context manager
 ) -> ContentSourceResponse:
     source_object = None # To hold the created source for returning
     try:
@@ -133,7 +133,7 @@ async def create_content_source(
 async def get_content_source(
     source_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentSourceResponse:
     """Get a specific content source."""
     async with db_session_cm as session:
@@ -154,7 +154,7 @@ async def update_content_source(
     source_id: UUID, # Changed to UUID
     source_update: ContentSourceUpdate,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentSourceResponse:
     """Update a content source."""
     async with db_session_cm as session:
@@ -187,7 +187,7 @@ async def update_content_source(
 async def delete_content_source(
     source_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Response:
     """Delete a content source."""
     async with db_session_cm as session:
@@ -223,7 +223,7 @@ async def get_content_feed(
     limit: int = Query(20, ge=1, le=100, description="Number of items to return"),
     offset: int = Query(0, ge=0, description="Number of items to skip"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> List[ContentItemResponse]:
     """Get content feed for user."""
     async with db_session_cm as session:
@@ -260,7 +260,7 @@ async def trigger_content_ingestion(
     background_tasks: BackgroundTasks, # Keep this if you want FastAPI to manage it directly
     source_id: Optional[UUID] = Query(None, description="Specific source to process"), # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentIngestionResponse:
     """Trigger content ingestion process."""
     task_id_str: Optional[str] = None
@@ -313,7 +313,7 @@ async def validate_feed_url_endpoint( # Renamed to avoid conflict with any impor
 @router.get("/stats", response_model=ContentStatsResponse)
 async def get_content_stats(
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentStatsResponse:
     """Get content processing statistics for user."""
     async with db_session_cm as session:

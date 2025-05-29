@@ -28,7 +28,7 @@ from app.core.security import (
     verify_token, # For get_current_active_user
     oauth2_scheme # For get_current_active_user
 )
-from app.database.connection import get_db_session
+from app.database.connection import get_db_session, AsyncSessionContextManager
 from app.repositories.user_repository import UserRepository
 from app.schemas.api_schemas import (
     UserCreate,
@@ -49,7 +49,7 @@ router = APIRouter()
 # This dependency will now handle getting the session correctly
 async def get_current_active_user_dependency(
     token: str = Depends(oauth2_scheme),
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -85,7 +85,7 @@ async def get_current_active_user_dependency(
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED) # Changed response to Token
 async def register(
     user_data: UserCreate,
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Token:
     """Register a new user."""
     async with db_session_context_manager as actual_session:
@@ -131,7 +131,7 @@ async def register(
 @router.post("/login", response_model=Token)
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Token:
     """User login with email and password."""
     async with db_session_context_manager as actual_session:
@@ -162,7 +162,7 @@ async def login(
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
     token_data: TokenRefresh,
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Token:
     """Refresh access token using refresh token."""
     try:
@@ -215,7 +215,7 @@ async def get_current_user_info(
 async def update_current_user(
     user_update: UserUpdate, # UserUpdate schema is fine for input
     current_user: User = Depends(get_current_active_user_dependency),
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> UserProfileData: # Return the updated profile using the correct schema
     async with db_session_context_manager as actual_session:
         user_repo = UserRepository(actual_session)
@@ -236,7 +236,7 @@ async def update_current_user(
 async def change_password(
     password_data: PasswordChange = Body(...), # Use Body for complex request bodies if needed
     current_user: User = Depends(get_current_active_user_dependency), # Use corrected dependency
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> dict:
     """Change user password."""
     async with db_session_context_manager as actual_session:
@@ -270,7 +270,7 @@ async def logout(
 async def update_preferences(
     preferences: dict = Body(...),
     current_user: User = Depends(get_current_active_user_dependency), # Use corrected dependency
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> dict:
     """Update user preferences."""
     async with db_session_context_manager as actual_session:
@@ -294,7 +294,7 @@ async def update_preferences(
 async def update_tone_profile(
     tone_profile: dict = Body(...),
     current_user: User = Depends(get_current_active_user_dependency), # Use corrected dependency
-    db_session_context_manager: AsyncSession = Depends(get_db_session)
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
 ) -> dict:
     """Update user tone profile."""
     async with db_session_context_manager as actual_session:

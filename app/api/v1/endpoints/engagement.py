@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user # Ensure this is correctly defined
-from app.database.connection import get_db_session # Your @asynccontextmanager decorated dependency
+from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager decorated dependency
 from app.repositories.engagement_repository import EngagementRepository
 from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined
     EngagementOpportunityResponse,
@@ -40,7 +40,7 @@ async def get_engagement_opportunities(
     priority: Optional[str] = Query(None, description="Filter by priority level"),
     engagement_type: Optional[str] = Query(None, description="Filter by engagement type"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> List[EngagementOpportunityResponse]: # Specific return type
     """Get engagement opportunities for user."""
     async with db_session_cm as session: # Use async with
@@ -90,7 +90,7 @@ async def get_engagement_opportunities(
 async def create_comment(
     comment_request: CommentRequest,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> CommentResponse: # Specific return type
     """Generate and create/simulate posting a comment for an engagement opportunity."""
     async with db_session_cm as session: # Use async with
@@ -170,7 +170,7 @@ async def create_comment(
 async def get_engagement_opportunity(
     opportunity_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> EngagementOpportunityResponse: # Specific return type
     """Get a specific engagement opportunity."""
     async with db_session_cm as session: # Use async with
@@ -191,7 +191,7 @@ async def skip_engagement_opportunity(
     opportunity_id: UUID, # Changed to UUID
     reason: Optional[str] = Query(None, description="Reason for skipping"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> dict: # Specific return type
     """Skip an engagement opportunity."""
     async with db_session_cm as session: # Use async with
@@ -223,7 +223,7 @@ async def record_engagement_feedback(
     opportunity_id: UUID, # Changed to UUID
     feedback: str = Query(..., description="Feedback (positive, negative, neutral)"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> dict: # Specific return type
     """Record user feedback on an engagement opportunity."""
     if feedback not in ["positive", "negative", "neutral"]:
@@ -257,7 +257,7 @@ async def record_engagement_feedback(
 async def get_engagement_stats(
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> EngagementStatsResponse: # Specific return type
     """Get engagement statistics for user."""
     async with db_session_cm as session: # Use async with
@@ -277,7 +277,7 @@ async def get_engagement_stats(
 async def get_high_priority_opportunities(
     limit: int = Query(10, ge=1, le=50, description="Number of opportunities to return"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> List[EngagementOpportunityResponse]: # Specific return type
     """Get high-priority engagement opportunities."""
     async with db_session_cm as session: # Use async with
@@ -301,7 +301,7 @@ async def schedule_engagement_opportunity_endpoint( # Renamed to avoid conflict
     opportunity_id: UUID, # Changed to UUID
     scheduled_time_str: Optional[str] = Query(None, alias="scheduled_time", description="ISO datetime for scheduling"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed
 ) -> dict: # Specific return type
     """Schedule an engagement opportunity for later execution."""
     async with db_session_cm as session: # Use async with

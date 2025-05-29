@@ -31,6 +31,39 @@ convention = {
 Base.metadata = MetaData(naming_convention=convention)
 
 
+class AsyncSessionContextManager:
+    """
+    Async context manager for database sessions that works with FastAPI dependencies.
+    
+    This allows you to use `async with db_session_cm as session:` in your endpoints
+    without needing to refactor all your existing code.
+    """
+    
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+        self.session_factory = session_factory
+        self.session: Optional[AsyncSession] = None
+    
+    async def __aenter__(self) -> AsyncSession:
+        """Enter the async context and return a database session."""
+        self.session = self.session_factory()
+        return self.session
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit the async context, handling commit/rollback and cleanup."""
+        if self.session:
+            try:
+                if exc_type is None:
+                    # No exception occurred, commit the transaction
+                    await self.session.commit()
+                else:
+                    # Exception occurred, rollback the transaction
+                    await self.session.rollback()
+            finally:
+                # Always close the session
+                await self.session.close()
+                self.session = None
+
+
 class DatabaseManager:
     """
     Manages database connections, sessions, and engine lifecycle.
@@ -40,8 +73,8 @@ class DatabaseManager:
     """
     
     def __init__(self):
-        self.engine: Optional[create_async_engine] = None # Corrected type hint
-        self.session_factory: Optional[async_sessionmaker[AsyncSession]] = None # Corrected type hint
+        self.engine: Optional[create_async_engine] = None
+        self.session_factory: Optional[async_sessionmaker[AsyncSession]] = None
         self._initialized = False
     
     def initialize(
@@ -94,26 +127,43 @@ class DatabaseManager:
             bind=self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
-            autoflush=False, # Typically False for async sessions unless you need specific autoflush behavior
+            autoflush=False,
             autocommit=False
         )
         self._initialized = True
         logger.info("Database manager initialized successfully")
     
     @asynccontextmanager
-    async def get_session_directly(self) -> AsyncGenerator[AsyncSession, None]:
-        if not self._initialized or not self.session_factory: # Check session_factory too
+    async def get_session_context(self) -> AsyncGenerator[AsyncSession, None]:
+        """
+        Get a database session with proper context management.
+        
+        This is for manual use when you need a direct context manager.
+        """
+        if not self._initialized or not self.session_factory:
             raise RuntimeError("Database manager not initialized. Call initialize() first.")
         
-        session: AsyncSession = self.session_factory() # Create a session
+        session: AsyncSession = self.session_factory()
         try:
             yield session
-            await session.commit() # Commit at the end of the 'with' block if no exceptions
+            await session.commit()
         except Exception:
-            await session.rollback() # Rollback on any exception
+            await session.rollback()
             raise
         finally:
-            await session.close() # Ensure session is closed
+            await session.close()
+
+    def get_session_cm(self) -> AsyncSessionContextManager:
+        """
+        Get an async context manager for database sessions.
+        
+        This returns a context manager that can be used with `async with`
+        and is compatible with FastAPI dependencies.
+        """
+        if not self._initialized or not self.session_factory:
+            raise RuntimeError("Database manager not initialized. Call initialize() first.")
+        
+        return AsyncSessionContextManager(self.session_factory)
 
     async def close(self) -> None:
         if self.engine:
@@ -126,24 +176,40 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 
-@asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+def get_db_session() -> AsyncSessionContextManager:
+    """
+    FastAPI dependency to get a database session context manager.
+    
+    This returns an AsyncSessionContextManager that can be used with `async with`
+    in your endpoints, allowing you to keep your existing code structure:
+    
+    ```python
+    async def my_endpoint(
+        db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+    ):
+        async with db_session_cm as session:
+            # Your existing code works unchanged!
+            repo = SomeRepository(session)
+            return await repo.some_method()
+    ```
+    """
     if not db_manager._initialized or not db_manager.session_factory:
-        raise RuntimeError("Database manager not initialized")
+        logger.error("get_db_session called but DatabaseManager not initialized!")
+        raise RuntimeError("Database manager not initialized. Call initialize() first.")
 
-    session: AsyncSession = db_manager.session_factory()
-    try:
-        yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
+    return db_manager.get_session_cm()
 
 
 def get_database_url() -> str:
-    """Get database URL from environment variables with validation."""
+    """
+    Get database URL from environment variables with validation.
+    
+    Returns:
+        str: Database connection URL
+        
+    Raises:
+        ValueError: If DATABASE_URL is not set
+    """
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL environment variable is required")
@@ -151,7 +217,15 @@ def get_database_url() -> str:
 
 
 async def init_database() -> None:
-    """Initialize database connection with environment configuration."""
+    """
+    Initialize database connection with environment configuration.
+    
+    Reads configuration from environment variables:
+    - DATABASE_URL: PostgreSQL connection string
+    - DATABASE_POOL_SIZE: Connection pool size (default: 20)
+    - DATABASE_MAX_OVERFLOW: Max overflow connections (default: 30)
+    - DEBUG: Enable SQL query logging (default: False)
+    """
     logger.info("Initializing database manager for FastAPI app...")
     database_url = get_database_url()
     pool_size = int(os.getenv("DATABASE_POOL_SIZE", "20"))
@@ -165,13 +239,13 @@ async def init_database() -> None:
         echo=echo_db
     )
 
-    # Test the connection
+    # Test the connection after initialization
     try:
-        async with get_db_session() as test_session:
+        async with db_manager.get_session_context() as test_session:
             await test_session.execute(text("SELECT 1"))
-        logger.info("Database session factory test successful during init.")
+        logger.info("Database connection test successful during init.")
     except Exception as e:
-        logger.error(f"Database session factory test failed during init: {e}", exc_info=True)
+        logger.error(f"Database connection test failed during init: {e}", exc_info=True)
         raise
 
 

@@ -17,7 +17,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 import os
 
-from app.database.connection import get_db_session # Your @asynccontextmanager dependency
+from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager dependency
 from app.repositories.user_repository import UserRepository
 from app.models.user import User # Your SQLAlchemy User model
 from app.utils.exceptions import InvalidCredentialsError # Your custom exception
@@ -127,7 +127,7 @@ def verify_refresh_token(token: str) -> dict:
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed for clarity
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed for clarity
 ) -> User:
     """
     Get current user from JWT access token.
