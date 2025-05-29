@@ -318,10 +318,9 @@ async def get_content_stats(
     """Get content processing statistics for user."""
     async with db_session_cm as session:
         try:
-            # Assuming ContentIngestionService needs the session for its repositories
             ingestion_service = ContentIngestionService(session)
             stats = await ingestion_service.get_processing_stats(current_user.id)
-            return ContentStatsResponse(**stats)
+            return stats  # ✅ already a ContentStatsResponse instance
         except Exception as e:
             logger.error(f"Failed to get content stats: {e}", exc_info=True)
             raise HTTPException(

@@ -292,33 +292,45 @@ class RSSParser:
     
     def _get_entry_link(self, entry: Any) -> Optional[str]:
         """
-        Extract URL from entry.
-        
+        Extract real article URL from entry, especially for Google News feeds.
+
         Args:
             entry: Feed entry object
-            
+
         Returns:
-            Entry URL or None
+            Clean, canonical article URL or None
         """
         try:
-            # Try different link fields
-            if hasattr(entry, 'link') and entry.link:
-                return entry.link
-            
+            # Google News uses redirect URLs in <link>; extract from <description> if needed
+            link = getattr(entry, 'link', None)
+
+            # Special handling for Google News feeds
+            if link and "news.google.com/rss/articles" in link:
+                description = self._get_entry_text(entry, 'description', '')
+                if '<a href="' in description:
+                    import re
+                    match = re.search(r'<a href="([^"]+)"', description)
+                    if match:
+                        return match.group(1)
+
+            # Fallbacks
+            if link:
+                return link
+
             if hasattr(entry, 'links') and entry.links:
-                for link in entry.links:
-                    if hasattr(link, 'href'):
-                        return link.href
-            
+                for l in entry.links:
+                    if hasattr(l, 'href'):
+                        return l.href
+
             if hasattr(entry, 'id') and entry.id:
-                # Sometimes ID is the URL
-                if entry.id.startswith('http'):
+                if entry.id.startswith("http"):
                     return entry.id
-            
+
             return None
-            
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error extracting entry link: {str(e)}")
             return None
+
     
     def _extract_author(self, entry: Any, feed: Any) -> Optional[str]:
         """

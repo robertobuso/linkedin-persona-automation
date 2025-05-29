@@ -9,7 +9,8 @@ import logging
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, timedelta
-from sqlalchemy import select, and_, or_, desc, asc, func
+from sqlalchemy import select, and_, or_, desc, asc, func, cast, String, literal_column, func
+from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.content import ContentSource, ContentItem, PostDraft, ContentStatus, DraftStatus
 from app.repositories.base import BaseRepository, NotFoundError, DuplicateError
@@ -55,19 +56,20 @@ class ContentSourceRepository(BaseRepository[ContentSource]):
         """
         if before_time is None:
             before_time = datetime.utcnow()
-        
+
+        interval_expr = cast(func.concat(ContentSource.check_frequency_hours, ' hours'), INTERVAL)
+        due_time = func.now() - interval_expr
+
         stmt = select(ContentSource).where(
             and_(
                 ContentSource.is_active == True,
                 or_(
                     ContentSource.last_checked_at.is_(None),
-                    ContentSource.last_checked_at <= (
-                        before_time - func.make_interval(hours=ContentSource.check_frequency_hours)
-                    )
+                    ContentSource.last_checked_at <= due_time
                 )
             )
         ).order_by(ContentSource.last_checked_at.asc().nullsfirst())
-        
+
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
     

@@ -19,6 +19,7 @@ from app.services.linkedin_scraper import LinkedInScraper
 from app.utils.content_extractor import ContentExtractor
 from app.utils.deduplication import ContentDeduplicator
 from app.database.connection import get_db_session
+from app.schemas.api_schemas import ContentStatsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -347,28 +348,25 @@ class ContentIngestionService:
             # Get sources due for check
             due_sources = await self.source_repo.get_sources_due_for_check()
             
-            return {
-                "total_sources": total_sources,
-                "active_sources": active_sources,
-                "inactive_sources": total_sources - active_sources,
-                "total_items_found": total_items_found,
-                "total_items_processed": total_items_processed,
-                "processing_rate": (
+            return ContentStatsResponse(
+                total_sources=total_sources,
+                active_sources=active_sources,
+                inactive_sources=total_sources - active_sources,
+                total_items_found=total_items_found,
+                total_items_processed=total_items_processed,
+                processing_rate=(
                     total_items_processed / total_items_found * 100
-                    if total_items_found > 0 else 0
+                    if total_items_found > 0 else 0.0
                 ),
-                "failed_sources": len(failed_sources),
-                "sources_due_for_check": len(due_sources),
-                "last_updated": datetime.utcnow().isoformat()
-            }
+                failed_sources=len(failed_sources),
+                sources_due_for_check=len(due_sources),
+                last_updated=datetime.utcnow() 
+            )
             
         except Exception as e:
-            logger.error(f"Failed to get processing stats: {str(e)}")
-            return {
-                "error": str(e),
-                "last_updated": datetime.utcnow().isoformat()
-            }
-
+            import traceback
+            logger.error(f"Failed to get processing stats: {str(e)}\n{traceback.format_exc()}")
+            return ContentStatsResponse(error=str(e), last_updated=datetime.utcnow())
 
 # Factory function for dependency injection
 async def get_content_ingestion_service() -> ContentIngestionService:

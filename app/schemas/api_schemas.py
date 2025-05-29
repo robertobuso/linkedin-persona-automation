@@ -197,13 +197,13 @@ class FeedValidationResponse(BaseResponseModel):
 
 class ContentStatsResponse(BaseResponseModel):
     """Schema for content statistics response."""
-    total_sources: int = Field(..., description="Total content sources")
-    active_sources: int = Field(..., description="Active sources")
-    total_items_found: int = Field(..., description="Total items found")
-    total_items_processed: int = Field(..., description="Total items processed")
-    processing_rate: float = Field(..., description="Processing success rate")
-    last_updated: datetime = Field(..., description="Last update time")
-
+    total_sources: int = Field(default=0, description="Total content sources")
+    active_sources: int = Field(default=0, description="Active sources")
+    total_items_found: int = Field(default=0, description="Total items found")
+    total_items_processed: int = Field(default=0, description="Total items processed")
+    processing_rate: float = Field(default=0.0, description="Processing success rate")
+    last_updated: datetime = Field(default_factory=datetime.utcnow, description="Last update time")
+    error: Optional[str] = Field(default=None, description="Error message, if any")
 
 # Draft Management Schemas
 class PostDraftCreate(BaseModel):

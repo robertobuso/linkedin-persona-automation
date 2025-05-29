@@ -99,6 +99,17 @@ class ContentExtractor:
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
     
+    @staticmethod
+    def is_ai_related(text: str) -> bool:
+        AI_KEYWORDS = [
+            "artificial intelligence", "AI", "machine learning", "deep learning",
+            "large language model", "LLM", "neural network", "OpenAI", "Anthropic",
+            "ChatGPT", "Claude", "Gemini", "transformer", "NLP", "Generative AI",
+            "foundation model", "data science"
+        ]
+        text_lower = text.lower()
+        return any(keyword.lower() in text_lower for keyword in AI_KEYWORDS)
+
     async def extract_full_content(self, url: str) -> Optional[str]:
         """
         Extract full article content from URL.
@@ -116,10 +127,15 @@ class ContentExtractor:
             content = await self._extract_with_playwright(url)
             if not content or len(content) < 200:
                 content = await self._extract_with_requests(url)
-            
+
             if content and len(content) >= 200:
                 # Clean and process content
                 cleaned_content = self._clean_content(content)
+
+                if not self.is_ai_related(cleaned_content):  # Correct function call
+                    logger.info(f"Filtered out non-AI content from {url}")
+                    return None
+
                 logger.info(f"Successfully extracted {len(cleaned_content)} characters from {url}")
                 return cleaned_content
             
@@ -129,6 +145,7 @@ class ContentExtractor:
         except Exception as e:
             logger.error(f"Content extraction failed for {url}: {str(e)}")
             return None
+
     
     async def _extract_with_playwright(self, url: str) -> Optional[str]:
         """
