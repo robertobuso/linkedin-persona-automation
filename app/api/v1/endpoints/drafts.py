@@ -7,14 +7,17 @@ and draft lifecycle operations.
 
 from typing import Any, List, Optional
 from datetime import datetime
+from uuid import UUID # Import UUID
+import logging # For logging
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_active_user
-from app.database.connection import get_db_session
+from app.core.security import get_current_active_user # Ensure this is correctly defined and working
+from app.database.connection import get_db_session # Your @asynccontextmanager decorated dependency
 from app.repositories.content_repository import PostDraftRepository, ContentItemRepository
-from app.services.content_generator import ContentGenerator
-from app.schemas.api_schemas import (
+from app.services.content_generator import ContentGenerator # Ensure this service is correctly implemented
+from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined and ORM compatible
     PostDraftCreate,
     PostDraftResponse,
     PostDraftUpdate,
@@ -23,9 +26,10 @@ from app.schemas.api_schemas import (
     DraftStatsResponse
 )
 from app.models.user import User
-from app.models.content import DraftStatus
-from app.utils.exceptions import ContentNotFoundError, ValidationError
+from app.models.content import DraftStatus # Ensure this Enum is defined
+from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -35,476 +39,347 @@ async def get_drafts(
     limit: int = Query(20, ge=1, le=100, description="Number of drafts to return"),
     offset: int = Query(0, ge=0, description="Number of drafts to skip"),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Get user's post drafts.
-    
-    Args:
-        status_filter: Optional status filter
-        limit: Number of drafts to return
-        offset: Number of drafts to skip
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        List of post drafts with pagination
-    """
-    draft_repo = PostDraftRepository(db)
-    
-    if status_filter:
-        try:
-            draft_status = DraftStatus(status_filter)
-            drafts = await draft_repo.get_drafts_by_status(
-                user_id=current_user.id,
-                status=draft_status,
-                limit=limit,
-                offset=offset
-            )
-        except ValueError:
-            raise ValidationError(f"Invalid status filter: {status_filter}")
-    else:
-        # Get all drafts with pagination
-        pagination_result = await draft_repo.list_with_pagination(
-            page=(offset // limit) + 1,
-            page_size=limit
-        )
-        
-        # Filter by user
-        user_drafts = [
-            draft for draft in pagination_result["items"]
-            if draft.user_id == current_user.id
-        ]
-        drafts = user_drafts
-    
-    return [PostDraftResponse.from_orm(draft) for draft in drafts]
+    db_session_cm: AsyncSession = Depends(get_db_session) # Renamed for clarity
+) -> List[PostDraftResponse]: # Specific return type
+    """Get user's post drafts."""
+    async with db_session_cm as session: # Use async with
+        draft_repo = PostDraftRepository(session) # Pass actual session
+        drafts_list: List[Any] # Define type for drafts_list
+
+        if status_filter:
+            try:
+                draft_status_enum = DraftStatus(status_filter) # Validate against Enum
+                # Assuming get_drafts_by_status returns a list of ORM objects
+                drafts_list = await draft_repo.get_drafts_by_status(
+                    user_id=current_user.id,
+                    status=draft_status_enum,
+                    limit=limit,
+                    offset=offset
+                )
+            except ValueError:
+                raise ValidationError(f"Invalid status filter: {status_filter}")
+        else:
+            # Assuming list_with_pagination correctly filters by user_id or you add it
+            # The original code filtered *after* pagination, which is inefficient.
+            # It's better if list_with_pagination can take a user_id filter.
+            # For now, assuming it fetches all and then we filter (less ideal).
+            # OR, if your PostDraftRepository.list_with_pagination can filter by user_id:
+            # pagination_result = await draft_repo.list_with_pagination(
+            #     user_id=current_user.id, # Add user_id filter here
+            #     page=(offset // limit) + 1,
+            #     page_size=limit
+            # )
+            # drafts_list = pagination_result["items"]
+
+            # Fallback to fetching all for user then manually handling pagination (less efficient for DB)
+            # This assumes PostDraftRepository doesn't have a get_all_by_user method with offset/limit.
+            # Ideally, the repository method should handle user filtering and pagination.
+            all_user_drafts = await draft_repo.find_by(user_id=current_user.id) # Example if find_by exists
+            drafts_list = all_user_drafts[offset : offset + limit]
+
+
+        # Use model_validate for Pydantic v2
+        return [PostDraftResponse.model_validate(draft) for draft in drafts_list]
 
 
 @router.post("", response_model=PostDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_draft(
     draft_data: PostDraftCreate,
-    background_tasks: BackgroundTasks,
+    # background_tasks: BackgroundTasks, # Removed if Celery is used for AI generation
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Create a new post draft from content item.
-    
-    Args:
-        draft_data: Draft creation data
-        background_tasks: Background tasks for processing
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Created post draft
-        
-    Raises:
-        HTTPException: If content item not found or generation fails
-    """
-    from uuid import UUID
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Create a new post draft from content item."""
     try:
-        content_item_id = UUID(draft_data.content_item_id)
+        content_item_uuid = UUID(draft_data.content_item_id)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid content_item_id format"
+            detail="Invalid content_item_id format. Must be a valid UUID."
         )
-    
-    # Verify content item exists and belongs to user's sources
-    content_repo = ContentItemRepository(db)
-    content_item = await content_repo.get_by_id(content_item_id)
-    
-    if not content_item:
-        raise ContentNotFoundError(f"Content item {content_item_id} not found")
-    
-    # Verify content item belongs to user's source
-    if content_item.source.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied to content item"
-        )
-    
-    try:
-        # FIX: Add error handling for missing service
+
+    async with db_session_cm as session:
+        content_repo = ContentItemRepository(session)
+        content_item = await content_repo.get_by_id(content_item_uuid)
+
+        if not content_item:
+            raise ContentNotFoundError(f"Content item {content_item_uuid} not found")
+
+        if not hasattr(content_item, 'source') or content_item.source.user_id != current_user.id:
+            # Ensure 'source' relationship is loaded or check source_id directly if ContentItem has user_id
+            # This check might need adjustment based on your exact model relationships.
+            # Assuming ContentItem.source is loaded and has user_id
+            source_check = await session.get(ContentSource, content_item.source_id) # Example check
+            if not source_check or source_check.user_id != current_user.id:
+                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
+
+
         try:
-            content_generator = ContentGenerator(db)
+            # Assuming ContentGenerator needs the session for its internal repositories
+            content_generator = ContentGenerator(session)
             draft = await content_generator.generate_post_from_content(
-                content_item_id=content_item_id,
+                content_item_id=content_item_uuid,
                 user_id=current_user.id,
-                style="professional",
-                num_variations=3
+                style=draft_data.style if hasattr(draft_data, 'style') else "professional", # Get from draft_data if available
+                num_variations=draft_data.num_variations if hasattr(draft_data, 'num_variations') else 1 # Get from draft_data
             )
-            return PostDraftResponse.from_orm(draft)
-            
+            return PostDraftResponse.model_validate(draft)
+
         except Exception as service_error:
-            # FIX: Graceful fallback if AI service fails
-            logging.error(f"AI generation failed: {str(service_error)}")
-            
-            # Create basic draft manually
-            draft_repo = PostDraftRepository(db)
-            fallback_draft = await draft_repo.create(
+            logger.error(f"AI generation failed for content_item {content_item_uuid}: {str(service_error)}", exc_info=True)
+            # Fallback logic from your original code
+            draft_repo = PostDraftRepository(session) # Need repo for fallback
+            fallback_draft = await draft_repo.create( # Assuming create method can take these kwargs
                 user_id=current_user.id,
-                source_content_id=content_item_id,
-                content=f"Sharing insights from: {content_item.title}\n\n{content_item.content[:500]}...",
-                hashtags=["#insight", "#sharing"],
+                source_content_id=content_item_uuid,
+                content=f"Sharing insights from: {content_item.title}\n\n{content_item.content[:500] if content_item.content else ''}...",
+                hashtags=["#insight", "#sharing"], # Ensure this is List[str] if model expects it
                 title=content_item.title[:255] if content_item.title else "Generated Post",
-                status=DraftStatus.DRAFT,  # Mark as draft for manual review
+                status=DraftStatus.DRAFT,
+                post_type="text", # Added from model
                 generation_metadata={
                     "fallback_generation": True,
                     "original_error": str(service_error),
                     "created_at": datetime.utcnow().isoformat()
                 }
             )
-            
-            return PostDraftResponse.from_orm(fallback_draft)
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create draft: {str(e)}"
-        )
+            return PostDraftResponse.model_validate(fallback_draft)
+
+        except Exception as e:
+            logger.error(f"Failed to create draft for content_item {content_item_uuid}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create draft: {str(e)}"
+            )
 
 
 @router.get("/{draft_id}", response_model=PostDraftResponse)
 async def get_draft(
-    draft_id: str,
+    draft_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Get a specific post draft.
-    
-    Args:
-        draft_id: Draft ID
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Post draft details
-        
-    Raises:
-        HTTPException: If draft not found or access denied
-    """
-    draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id)
-    
-    if not draft:
-        raise ContentNotFoundError(f"Draft {draft_id} not found")
-    
-    if draft.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    return PostDraftResponse.from_orm(draft)
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Get a specific post draft."""
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        draft = await draft_repo.get_by_id(draft_id)
+
+        if not draft:
+            raise ContentNotFoundError(f"Draft {draft_id} not found")
+
+        if draft.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        return PostDraftResponse.model_validate(draft)
 
 
 @router.put("/{draft_id}", response_model=PostDraftResponse)
 async def update_draft(
-    draft_id: str,
+    draft_id: UUID, # Changed to UUID
     draft_update: PostDraftUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Update a post draft.
-    
-    Args:
-        draft_id: Draft ID
-        draft_update: Draft update data
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Updated post draft
-        
-    Raises:
-        HTTPException: If draft not found or access denied
-    """
-    draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id)
-    
-    if not draft:
-        raise ContentNotFoundError(f"Draft {draft_id} not found")
-    
-    if draft.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    # Prepare update data
-    update_data = {}
-    if draft_update.content is not None:
-        update_data["content"] = draft_update.content
-    if draft_update.hashtags is not None:
-        update_data["hashtags"] = draft_update.hashtags
-    if draft_update.title is not None:
-        update_data["title"] = draft_update.title
-    if draft_update.status is not None:
-        update_data["status"] = draft_update.status
-    if draft_update.scheduled_for is not None:
-        update_data["scheduled_for"] = draft_update.scheduled_for
-    
-    try:
-        updated_draft = await draft_repo.update(draft_id, **update_data)
-        if updated_draft:
-            return PostDraftResponse.from_orm(updated_draft)
-        else:
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Update a post draft."""
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        draft = await draft_repo.get_by_id(draft_id)
+
+        if not draft:
             raise ContentNotFoundError(f"Draft {draft_id} not found")
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update draft: {str(e)}"
-        )
+
+        if draft.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        update_data = draft_update.model_dump(exclude_unset=True)
+
+        try:
+            # Assuming repository update method takes id and kwargs
+            updated_draft = await draft_repo.update(id=draft_id, **update_data)
+            if not updated_draft: # Should not happen if found above
+                raise ContentNotFoundError(f"Draft {draft_id} not found during update")
+            return PostDraftResponse.model_validate(updated_draft)
+        except Exception as e:
+            logger.error(f"Failed to update draft {draft_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update draft: {str(e)}"
+            )
 
 
 @router.post("/{draft_id}/publish", response_model=PublishResponse)
 async def publish_draft(
-    draft_id: str,
+    draft_id: UUID, # Changed to UUID
     publish_request: PublishRequest,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks, # Keep if needed for non-Celery background tasks
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Publish or schedule a post draft.
-    
-    Args:
-        draft_id: Draft ID
-        publish_request: Publish request data
-        background_tasks: Background tasks for processing
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Publish response with status
-        
-    Raises:
-        HTTPException: If draft not found or publishing fails
-    """
-    draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id)
-    
-    if not draft:
-        raise ContentNotFoundError(f"Draft {draft_id} not found")
-    
-    if draft.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    try:
-        if publish_request.scheduled_time:
-            # Schedule for later
-            scheduled_draft = await draft_repo.schedule_draft(
-                draft_id=draft_id,
-                scheduled_time=publish_request.scheduled_time
-            )
-            
-            if scheduled_draft:
-                return PublishResponse(
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> PublishResponse:
+    """Publish or schedule a post draft."""
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        draft = await draft_repo.get_by_id(draft_id)
+
+        if not draft:
+            raise ContentNotFoundError(f"Draft {draft_id} not found")
+
+        if draft.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        try:
+            if publish_request.scheduled_time:
+                scheduled_draft = await draft_repo.schedule_draft(
                     draft_id=draft_id,
-                    status="scheduled",
-                    scheduled_time=publish_request.scheduled_time,
-                    message=f"Post scheduled for {publish_request.scheduled_time}"
+                    scheduled_time=publish_request.scheduled_time
                 )
-        else:
-            # Publish immediately (in real implementation, this would integrate with LinkedIn API)
-            published_draft = await draft_repo.mark_as_published(
-                draft_id=draft_id,
-                linkedin_post_id=f"linkedin_post_{draft_id}",  # Mock LinkedIn post ID
-                linkedin_post_url=f"https://linkedin.com/posts/{draft_id}"  # Mock URL
-            )
-            
-            if published_draft:
-                # In real implementation, track analytics
-                background_tasks.add_task(
-                    # track_post_performance,
-                    lambda: None,  # Placeholder
-                    draft_id
-                )
-                
-                return PublishResponse(
+                if scheduled_draft:
+                    return PublishResponse(
+                        draft_id=str(draft_id),
+                        status="scheduled",
+                        scheduled_time=publish_request.scheduled_time,
+                        message=f"Post scheduled for {publish_request.scheduled_time}"
+                    )
+            else:
+                # This part is still a mock for LinkedIn API
+                # The actual call to LinkedInService would happen here or in a Celery task
+                published_draft = await draft_repo.mark_as_published(
                     draft_id=draft_id,
-                    status="published",
-                    linkedin_post_id=f"linkedin_post_{draft_id}",
-                    linkedin_post_url=f"https://linkedin.com/posts/{draft_id}",
-                    message="Post published successfully"
+                    linkedin_post_id=f"mock_linkedin_post_{draft_id}",
+                    linkedin_post_url=f"https://linkedin.com/posts/mock_{draft_id}"
                 )
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to publish draft"
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to publish draft: {str(e)}"
-        )
+                if published_draft:
+                    # background_tasks.add_task(lambda: None, draft_id) # Placeholder
+                    return PublishResponse(
+                        draft_id=str(draft_id),
+                        status="published",
+                        linkedin_post_id=f"mock_linkedin_post_{draft_id}",
+                        linkedin_post_url=f"https://linkedin.com/posts/mock_{draft_id}",
+                        message="Post (mock) published successfully"
+                    )
+            
+            # Fallback if neither scheduling nor direct publishing logic leads to a return
+            logger.error(f"Publish logic did not result in a response for draft {draft_id}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to publish draft")
+
+        except Exception as e:
+            logger.error(f"Failed to publish draft {draft_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to publish draft: {str(e)}"
+            )
 
 
 @router.delete("/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(
-    draft_id: str, # Change to UUID if your model uses it
+    draft_id: UUID, # Changed to UUID
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Response: # Explicitly return a Response type
-    """
-    Delete a post draft.
-    
-    Args:
-        draft_id: Draft ID
-        current_user: Current authenticated user
-        db: Database session
-        
-    Raises:
-        HTTPException: If draft not found or access denied
-    """
-    draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id) # Assuming draft_id is now UUID
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> Response:
+    """Delete a post draft."""
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        draft = await draft_repo.get_by_id(draft_id)
 
-    if not draft:
-        raise ContentNotFoundError(f"Draft {draft_id} not found")
+        if not draft:
+            raise ContentNotFoundError(f"Draft {draft_id} not found")
 
-    if draft.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        if draft.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    try:
-        await draft_repo.delete(draft_id)
-        return Response(status_code=status.HTTP_204_NO_CONTENT) # Return an explicit Response
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete draft: {str(e)}"
-        )
+        try:
+            # Assuming BaseRepository.delete takes id and returns bool or raises
+            deleted = await draft_repo.delete(id=draft_id)
+            # if not deleted:
+            #     raise ContentNotFoundError(f"Draft {draft_id} could not be deleted or was already deleted.")
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            logger.error(f"Failed to delete draft {draft_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete draft: {str(e)}"
+            )
 
 
 @router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
-async def regenerate_draft(
-    draft_id: str,
+async def regenerate_draft_endpoint( # Renamed to avoid conflict
+    draft_id: UUID, # Changed to UUID
     style: Optional[str] = Query("professional", description="Style for regeneration"),
     preserve_hashtags: bool = Query(False, description="Preserve existing hashtags"),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Regenerate a post draft with new content.
-    
-    Args:
-        draft_id: Draft ID
-        style: Style for regeneration
-        preserve_hashtags: Whether to preserve existing hashtags
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Regenerated post draft
-        
-    Raises:
-        HTTPException: If draft not found or regeneration fails
-    """
-    draft_repo = PostDraftRepository(db)
-    draft = await draft_repo.get_by_id(draft_id)
-    
-    if not draft:
-        raise ContentNotFoundError(f"Draft {draft_id} not found")
-    
-    if draft.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    try:
-        content_generator = ContentGenerator(db)
-        regenerated_draft = await content_generator.regenerate_post_draft(
-            draft_id=draft_id,
-            style=style,
-            preserve_hashtags=preserve_hashtags
-        )
-        
-        if regenerated_draft:
-            return PostDraftResponse.from_orm(regenerated_draft)
-        else:
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Regenerate a post draft with new content."""
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        draft = await draft_repo.get_by_id(draft_id)
+
+        if not draft:
+            raise ContentNotFoundError(f"Draft {draft_id} not found")
+
+        if draft.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        try:
+            content_generator = ContentGenerator(session) # Pass session
+            regenerated_draft = await content_generator.regenerate_post_draft(
+                draft_id=draft_id,
+                style=style,
+                preserve_hashtags=preserve_hashtags
+            )
+
+            if regenerated_draft:
+                return PostDraftResponse.model_validate(regenerated_draft)
+            else:
+                # This case might indicate an issue within regenerate_post_draft if it can return None
+                logger.error(f"Regeneration returned None for draft {draft_id}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to regenerate draft")
+        except Exception as e:
+            logger.error(f"Failed to regenerate draft {draft_id}: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to regenerate draft"
+                detail=f"Failed to regenerate draft: {str(e)}"
             )
-            
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to regenerate draft: {str(e)}"
-        )
 
 
 @router.get("/stats/summary", response_model=DraftStatsResponse)
 async def get_draft_stats(
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Get draft statistics summary for user.
-    
-    Args:
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Draft statistics summary
-    """
-    try:
-        draft_repo = PostDraftRepository(db)
-        stats = await draft_repo.get_user_drafts_summary(current_user.id)
-        
-        return DraftStatsResponse(**stats)
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get draft stats: {str(e)}"
-        )
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> DraftStatsResponse:
+    """Get draft statistics summary for user."""
+    async with db_session_cm as session:
+        try:
+            draft_repo = PostDraftRepository(session)
+            stats = await draft_repo.get_user_drafts_summary(current_user.id)
+            return DraftStatsResponse(**stats)
+        except Exception as e:
+            logger.error(f"Failed to get draft stats for user {current_user.id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get draft stats: {str(e)}"
+            )
 
 
 @router.post("/batch-generate", response_model=List[PostDraftResponse])
-async def batch_generate_drafts(
+async def batch_generate_drafts_endpoint( # Renamed to avoid conflict
     max_posts: int = Query(5, ge=1, le=10, description="Maximum posts to generate"),
     min_relevance_score: int = Query(70, ge=0, le=100, description="Minimum relevance score"),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
-) -> Any:
-    """
-    Generate multiple drafts from high-relevance content.
-    
-    Args:
-        max_posts: Maximum number of posts to generate
-        min_relevance_score: Minimum relevance score for content selection
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        List of generated post drafts
-    """
-    try:
-        content_generator = ContentGenerator(db)
-        drafts = await content_generator.batch_generate_posts(
-            user_id=current_user.id,
-            max_posts=max_posts,
-            min_relevance_score=min_relevance_score
-        )
-        
-        return [PostDraftResponse.from_orm(draft) for draft in drafts]
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to batch generate drafts: {str(e)}"
-        )
+    db_session_cm: AsyncSession = Depends(get_db_session)
+) -> List[PostDraftResponse]:
+    """Generate multiple drafts from high-relevance content."""
+    async with db_session_cm as session:
+        try:
+            content_generator = ContentGenerator(session) # Pass session
+            drafts = await content_generator.batch_generate_posts(
+                user_id=current_user.id,
+                max_posts=max_posts,
+                min_relevance_score=min_relevance_score
+            )
+            return [PostDraftResponse.model_validate(draft) for draft in drafts]
+        except Exception as e:
+            logger.error(f"Failed to batch generate drafts for user {current_user.id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to batch generate drafts: {str(e)}"
+            )

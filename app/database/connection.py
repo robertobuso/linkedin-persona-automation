@@ -125,17 +125,27 @@ class DatabaseManager:
 # Global database manager instance
 db_manager = DatabaseManager()
 
-@asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency function to get database session for dependency injection.
-    
-    Yields:
-        AsyncSession: Database session for executing queries
+    FastAPI dependency to get a database session.
+    It yields the session, and FastAPI handles the context management.
     """
-    # FIX: Use the proper async generator delegation
-    async with db_manager.get_session() as session: 
+    if not db_manager._initialized or not db_manager.session_factory:
+        # Ensure db_manager is initialized (e.g., in FastAPI lifespan)
+        # This might happen if a worker/process didn't run the full init.
+        # However, init_database() should be called by the main app and workers.
+        logger.error("get_db_session called but DatabaseManager not initialized!")
+        raise RuntimeError("Database manager not initialized. Call initialize() first.")
+
+    session: AsyncSession = db_manager.session_factory()
+    try:
         yield session
+        await session.commit() # Commit if no exceptions within the route handler's use of session
+    except Exception:
+        await session.rollback() # Rollback on any exception
+        raise
+    finally:
+        await session.close() # Always close the session
 
 
 def get_database_url() -> str:
@@ -176,24 +186,18 @@ async def init_database() -> None:
         max_overflow=max_overflow,
         echo=echo_db
     )
-    
-    # FIX: Add database table creation
-    # from app.models import user, content  # Import all models
-    # async with db_manager.get_session() as session:
-    #     async with session.begin():
-    #         # Create all tables
-    #         await session.run_sync(Base.metadata.create_all, db_manager.engine.sync_engine)
-    
-    # logger.info("Database tables created/verified")
 
     # Optional: Test the connection after initialization
     try:
-        async with db_manager.get_session() as session:
-            await session.execute(text("SELECT 1"))
-        logger.info("Database session acquisition and test query successful during init.")
+                # For a simpler test of the factory:
+        test_session = db_manager.session_factory()
+        await test_session.execute(text("SELECT 1"))
+        await test_session.commit()
+        await test_session.close()
+        logger.info("Database session factory test successful during init.")
     except Exception as e:
-        logger.error(f"Database session test failed during init: {e}", exc_info=True)
-        raise # If the DB isn't really ready, the app shouldn't start
+        logger.error(f"Database session factory test failed during init: {e}", exc_info=True)
+        raise
 
 
 async def close_database() -> None:
