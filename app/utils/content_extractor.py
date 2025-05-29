@@ -491,6 +491,18 @@ class ContentExtractor:
             Dictionary with content metadata
         """
         try:
+            if not isinstance(content, str):
+                logger.error(f"Expected string content but got {type(content).__name__}")
+                return {
+                    "word_count": 0,
+                    "character_count": 0,
+                    "summary": "",
+                    "reading_time_minutes": 0,
+                    "key_sentences": [],
+                    "content_type": "unknown",
+                    "complexity_score": 0.0
+                }
+        
             # Basic statistics
             word_count = len(content.split())
             char_count = len(content)

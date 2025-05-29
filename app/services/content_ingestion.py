@@ -181,9 +181,9 @@ class ContentIngestionService:
                     
                     # Extract full content if needed
                     if len(item.content) < 500:
-                        full_content = await self.content_extractor.extract_full_content(item.url)
-                        if full_content:
-                            item.content = full_content
+                        full_content_result = await self.content_extractor.extract_full_content(item.url)
+                        if full_content_result and isinstance(full_content_result, dict):
+                            item.content = full_content_result.get("content", item.content)
                     
                     # Create content item
                     await self.content_repo.create_content_item(
