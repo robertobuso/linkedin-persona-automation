@@ -101,7 +101,7 @@ class DatabaseManager:
         logger.info("Database manager initialized successfully")
     
     @asynccontextmanager
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_session_directly(self) -> AsyncGenerator[AsyncSession, None]:
         if not self._initialized or not self.session_factory: # Check session_factory too
             raise RuntimeError("Database manager not initialized. Call initialize() first.")
         

@@ -15,7 +15,7 @@ import logging # For logging in background task
 logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_active_user # Make sure this dependency is correctly defined and working
-from app.database.connection import get_db_session # This is your @asynccontextmanager decorated dependency
+from app.database.connection import get_db_session, db_manager # This is your @asynccontextmanager decorated dependency
 from app.repositories.content_repository import ContentSourceRepository, ContentItemRepository
 from app.services.content_ingestion import ContentIngestionService # Ensure this service is correctly implemented
 from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined
@@ -38,19 +38,25 @@ router = APIRouter()
 
 # Helper function for background source processing (if not using Celery for this specific one)
 async def _process_source_background(source_id_str: str):
-    """Background task simulation to process content source."""
-    # This function will run in a separate thread managed by FastAPI's BackgroundTasks
-    # It needs its own database session.
     logger.info(f"Background task started for source_id: {source_id_str}")
+    if not db_manager.session_factory: # Check if DatabaseManager is initialized
+        logger.error("DB_MANAGER NOT INITIALIZED FOR BACKGROUND TASK. Call init_database() during app startup.")
+        return
+
+    session: AsyncSession = db_manager.session_factory() # Get a new session
     try:
-        async with get_db_session() as session: # Create a new session for the background task
-            ingestion_service = ContentIngestionService(session) # Initialize service with the new session
-            source_uuid = UUID(source_id_str)
-            result = await ingestion_service.process_source_by_id(source_uuid) # Assuming this method exists
-            # Assuming result has a to_dict() or similar method if ProcessingResult is a class
-            logger.info(f"Background processing completed for source {source_id_str}: {result.to_dict() if hasattr(result, 'to_dict') else result}")
+        ingestion_service = ContentIngestionService(session) # Pass the actual session
+        source_uuid = UUID(source_id_str)
+        # Assuming process_source_by_id exists and handles its own commits/rollbacks if it's a long process
+        # or the service methods interact with the session such that changes are staged.
+        result = await ingestion_service.process_source_by_id(source_uuid)
+        await session.commit() # Commit changes made by ingestion_service
+        logger.info(f"Background processing completed for source {source_id_str}: {result.to_dict() if hasattr(result, 'to_dict') else result}")
     except Exception as e:
+        await session.rollback() # Rollback on error
         logger.error(f"Background processing failed for source {source_id_str}: {str(e)}", exc_info=True)
+    finally:
+        await session.close() # Always close the session
 
 
 @router.get("/sources", response_model=List[ContentSourceResponse])
@@ -70,53 +76,61 @@ async def create_content_source(
     source_data: ContentSourceCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSession = Depends(get_db_session)
+    db_session_cm: AsyncSession = Depends(get_db_session) # Injected context manager
 ) -> ContentSourceResponse:
-    """Create a new content source."""
-    async with db_session_cm as session:
-        # content_service = get_content_service(session) # If you have a factory/dependency for this
-        # For now, let's assume RSSParser needs to be instantiated for validation
-        from app.services.rss_parser import RSSParser # Temporary import, ideally inject service
-        rss_parser = RSSParser()
+    source_object = None # To hold the created source for returning
+    try:
+        async with db_session_cm as session:
+            from app.services.rss_parser import RSSParser
+            rss_parser = RSSParser()
 
-        try:
-            test_result = await rss_parser.validate_feed_url(str(source_data.url))
-            if not test_result["valid"]:
+            try:
+                test_result = await rss_parser.validate_feed_url(str(source_data.url))
+                if not test_result["valid"]:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid feed URL: {test_result.get('error', 'Unknown validation error')}"
+                    )
+            except Exception as ve: # Catch potential errors from validate_feed_url
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid feed URL: {test_result.get('error', 'Unknown validation error')}"
-                )
-        except Exception as ve: # Catch potential errors from validate_feed_url
-             raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Feed URL validation failed: {str(ve)}"
-                )
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Feed URL validation failed: {str(ve)}"
+                    )
 
-        source_repo = ContentSourceRepository(session)
-        try:
-            source_dict = source_data.model_dump() # Pydantic v2
+            source_repo = ContentSourceRepository(session)
+            source_dict = source_data.model_dump()
             source_dict["user_id"] = current_user.id
             source_dict["url"] = str(source_data.url) if source_data.url else None
+            
+            source_object = await source_repo.create(**source_dict) # Create the source
+            
+            # The commit will happen when the 'async with' block exits successfully
+            # OR when get_db_session's try block finishes successfully.
 
-            # Assuming create method in repository takes keyword arguments matching model fields
-            source = await source_repo.create(**source_dict)
+            # If we are here, the session commit (from get_db_session) should have happened.
+            # Schedule background task *after* successful commit of the source.
+            if source_object:
+                background_tasks.add_task(_process_source_background, str(source_object.id))
+                return ContentSourceResponse.model_validate(source_object)
+            else:
+                # This case should ideally not be reached if create raises an error on failure
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create content source, object not returned."
+                )
 
-            # Trigger initial content fetch in background
-            # Using FastAPI's BackgroundTasks for simplicity here,
-            # but the prompt mentioned Celery's process_source_task
-            # If process_source_task.delay is for Celery:
-            # process_source_task.delay(str(source.id))
-            # If using FastAPI's BackgroundTasks:
-            background_tasks.add_task(_process_source_background, str(source.id))
-
-            return ContentSourceResponse.model_validate(source)
-
-        except Exception as e:
-            logger.error(f"Failed to create content source: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create content source: {str(e)}"
-            )
+    except HTTPException: # Re-raise HTTPExceptions
+        raise
+    except ValueError as ve: # Catch specific validation errors from Pydantic or your logic
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except DuplicateError as de: # If your repo raises this
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(de))
+    except Exception as e:
+        logger.error(f"Failed to create content source: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create content source: {str(e)}"
+        )
 
 
 @router.get("/sources/{source_id}", response_model=ContentSourceResponse)
