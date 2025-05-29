@@ -1,4 +1,3 @@
-# app/api/v1/endpoints/preferences.py
 """
 Content preferences management endpoints for LinkedIn Presence Automation Application.
 
@@ -293,7 +292,7 @@ async def _invalidate_user_cache_task(user_id: UUID) -> None:
 
 
 # Integration endpoint for frontend preferences form
-@router.post("/preferences/quick-setup", response_model=ContentPreferencesResponse)
+@router.post("/quick-setup", response_model=ContentPreferencesResponse)
 async def quick_preferences_setup(
     setup_data: Dict[str, Any],
     background_tasks: BackgroundTasks,

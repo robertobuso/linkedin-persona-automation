@@ -16,6 +16,7 @@ from uuid import UUID
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain.schema import BaseMessage, SystemMessage, HumanMessage
 
 from app.models.content import ContentItem, ContentStatus
 from app.models.user import User, ContentSelection
@@ -359,63 +360,108 @@ Focus on providing actionable, LinkedIn-specific insights that match the user's 
     
     async def _invoke_llm_with_structured_output(self, prompt: str) -> Dict[str, Any]:
         """
-        Invoke LLM with structured output for analysis.
+        Invoke LLM with structured output for deep content analysis.
         
-        This is a placeholder for actual LLM integration.
-        In production, this would call the AI service.
+        Args:
+            prompt: Analysis prompt to send to LLM
+            
+        Returns:
+            Structured analysis response
         """
-        # TODO: Replace with actual LLM service call
-        logger.debug("Invoking LLM for deep content analysis (mock implementation)")
-        
-        # This would be replaced with actual AI service call:
-        # from app.services.ai_service import AIService
-        # ai_service = AIService()
-        # response = await ai_service.analyze_content_deeply(prompt)
-        # return response
-        
-        # Mock response for development
-        await asyncio.sleep(0.2)  # Simulate processing time
-        return {
-            "key_insights": [
-                "Emerging technology trends are reshaping traditional business models",
-                "Data-driven decision making is becoming critical for competitive advantage",
-                "Remote work technologies are enabling new forms of collaboration"
-            ],
-            "main_themes": [
-                "Digital Transformation",
-                "Business Innovation",
-                "Technology Adoption"
-            ],
-            "linkedin_angles": [
-                "Share personal experience with digital transformation challenges",
-                "Discuss how your industry is adapting to these changes",
-                "Ask your network about their experiences with similar trends",
-                "Position yourself as a thought leader in technology adoption"
-            ],
-            "actionable_takeaways": [
-                "Evaluate current business processes for digitization opportunities",
-                "Invest in data analytics capabilities and training",
-                "Develop a remote-first technology strategy",
-                "Create a change management plan for technology adoption"
-            ],
-            "target_audience": "Technology leaders, business executives, and professionals involved in digital transformation initiatives",
-            "suggested_hashtags": [
-                "#DigitalTransformation",
-                "#BusinessInnovation", 
-                "#TechLeadership",
-                "#DataDriven",
-                "#FutureOfWork",
-                "#Innovation",
-                "#Technology",
-                "#Leadership"
-            ],
-            "engagement_potential": 0.82,
-            "relevance_score": 0.88,
-            "selection_reason": "This content aligns well with the user's interests in technology and business innovation, providing actionable insights that can be shared with their professional network",
-            "content_quality": "High-quality content from a reputable source with practical insights and current relevance",
-            "linkedin_suitability": "Excellent fit for LinkedIn - professional focus, actionable insights, and discussion-worthy topics"
+        try:
+            from app.services.ai_service import AIService
+            
+            ai_service = AIService()
+            
+            system_prompt = """You are an expert LinkedIn content strategist and analyst. 
+            Analyze content and provide structured insights in JSON format.
+            
+            Return your response as a JSON object with this exact structure:
+            {
+                "key_insights": ["insight 1", "insight 2", "..."],
+                "main_themes": ["theme 1", "theme 2", "..."],
+                "linkedin_angles": ["angle 1", "angle 2", "..."],
+                "actionable_takeaways": ["takeaway 1", "takeaway 2", "..."],
+                "target_audience": "description of target audience",
+                "suggested_hashtags": ["#hashtag1", "#hashtag2", "..."],
+                "engagement_potential": 0.85,
+                "relevance_score": 0.90,
+                "selection_reason": "detailed explanation",
+                "content_quality": "assessment of content quality",
+                "linkedin_suitability": "how well this fits LinkedIn context"
+            }"""
+            
+            langchain_messages: List[BaseMessage] = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt)
+            ]
+            
+            response_text, metrics = await ai_service._invoke_llm_with_fallback(
+                messages=langchain_messages,
+                max_tokens=2000,
+                temperature=0.7
+            )
+            
+            # Parse and validate JSON response
+            try:
+                import json
+                result = json.loads(response_text)
+                
+                # Validate required fields
+                required_fields = [
+                    "key_insights", "main_themes", "linkedin_angles", 
+                    "actionable_takeaways", "target_audience", "suggested_hashtags",
+                    "engagement_potential", "relevance_score", "selection_reason"
+                ]
+                
+                for field in required_fields:
+                    if field not in result:
+                        logger.warning(f"Missing required field in LLM response: {field}")
+                        result[field] = self._get_default_value(field)
+                
+                return result
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM analysis response: {str(e)}")
+                return await self._fallback_analysis_response()
+                
+        except Exception as e:
+            logger.error(f"Deep analysis LLM service failed: {str(e)}")
+            return await self._fallback_analysis_response()
+
+    def _get_default_value(self, field: str) -> Any:
+        """Get default value for missing LLM response fields."""
+        defaults = {
+            "key_insights": ["Content analysis not available"],
+            "main_themes": ["General content"],
+            "linkedin_angles": ["Share as professional insight"],
+            "actionable_takeaways": ["Review content for insights"],
+            "target_audience": "Professional audience",
+            "suggested_hashtags": ["#Professional", "#Content"],
+            "engagement_potential": 0.5,
+            "relevance_score": 0.5,
+            "selection_reason": "Automated selection",
+            "content_quality": "Quality assessment unavailable",
+            "linkedin_suitability": "Standard professional content"
         }
-    
+        return defaults.get(field, "Not available")
+
+    async def _fallback_analysis_response(self) -> Dict[str, Any]:
+        """Fallback response when LLM analysis fails."""
+        return {
+            "key_insights": ["Content analysis unavailable due to service error"],
+            "main_themes": ["Analysis failed"],
+            "linkedin_angles": ["Share as interesting professional content"],
+            "actionable_takeaways": ["Review content manually"],
+            "target_audience": "General professional audience",
+            "suggested_hashtags": ["#Professional", "#Content"],
+            "engagement_potential": 0.5,
+            "relevance_score": 0.5,
+            "selection_reason": "Fallback analysis due to service error",
+            "content_quality": "Could not assess due to service error",
+            "linkedin_suitability": "Standard professional content"
+        }
+
     async def _parse_analysis_response(
         self,
         llm_response: Dict[str, Any],
@@ -531,15 +577,36 @@ Focus on providing actionable, LinkedIn-specific insights that match the user's 
     async def _create_content_item_from_article(
         self,
         article_data: Dict[str, Any],
-        user_id: Optional[UUID]
+        user_id: Optional[UUID] # user_id for context if needed for source lookup
     ) -> ContentItem:
-        """Create ContentItem from selected article data."""
+        logger.info(f"DCA_SERVICE: _create_content_item_from_article for URL: {article_data.get('url')}")
         try:
-            # For this implementation, we'll create a basic content item
-            # In production, you'd need to link to a proper content source
+            # Check if content item with this URL already exists
+            existing_item = await self.content_repo.get_by_url(article_data.get("url", "")) # Assumes ContentItemRepository has get_by_url
+            if existing_item:
+                logger.info(f"DCA_SERVICE: Content item with URL {article_data.get('url')} already exists (ID: {existing_item.id}). Using existing.")
+                # Optionally, update some fields if needed, or just return it
+                # For now, let's just return it. Deep analysis might still run on it.
+                return existing_item
+
+            source_id_str = article_data.get("source_id")
+            logger.info(f"DCA_SERVICE: Extracted source_id_str: {source_id_str}")
+
+            if not source_id_str:
+                # This should be less likely now that it's passed from the selection phase
+                logger.error(f"DCA_SERVICE: source_id is missing in article_data for title: {article_data.get('title')}")
+                raise ValueError(f"source_id is missing for article {article_data.get('title')}")
+            
+            try:
+                actual_source_id = UUID(source_id_str)
+            except ValueError as ve:
+                logger.error(f"DCA_SERVICE: source_id_str '{source_id_str}' is not a valid UUID string for title: {article_data.get('title')}. Error: {ve}")
+                raise ValueError(f"Invalid source_id format for article {article_data.get('title')}") from ve
+
             content_item = ContentItem(
                 title=article_data.get("title", "Unknown Title"),
                 url=article_data.get("url", ""),
+                source_id=actual_source_id,
                 content=article_data.get("content", ""),
                 author=article_data.get("author"),
                 published_at=datetime.fromisoformat(article_data["published_at"]) if article_data.get("published_at") else None,
@@ -550,13 +617,13 @@ Focus on providing actionable, LinkedIn-specific insights that match the user's 
             )
             
             self.session.add(content_item)
-            await self.session.flush()
+            await self.session.flush() # This will raise the UniqueViolationError if URL exists and not caught above
             await self.session.refresh(content_item)
-            
+            logger.info(f"DCA_SERVICE: Created new content item ID: {content_item.id} for URL: {content_item.url}")
             return content_item
             
-        except Exception as e:
-            logger.error(f"Failed to create content item from article data: {str(e)}")
+        except Exception as e: # Catch specific errors if possible
+            logger.error(f"DCA_SERVICE: Failed to create/get content item from article data for URL {article_data.get('url')}: {str(e)}", exc_info=True)
             raise
     
     async def _update_content_with_feedback(

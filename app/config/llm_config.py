@@ -56,7 +56,7 @@ class LLMConfigManager:
         if openai_api_key:
             self.providers[LLMProvider.OPENAI] = LLMConfig(
                 provider=LLMProvider.OPENAI,
-                model_name=os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview"),
+                model_name=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo-0125"),
                 api_key=openai_api_key,
                 max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "4000")),
                 temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.7")),

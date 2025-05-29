@@ -18,6 +18,7 @@ from app.models import Base
 from app.models.user import User
 from app.models.content import ContentSource, ContentItem, PostDraft
 from app.models.engagement import EngagementOpportunity
+from app.models.user_content_preferences import UserContentPreferences  
 
 # This is the Alembic Config object, which provides access to the values within the .ini file
 config = context.config

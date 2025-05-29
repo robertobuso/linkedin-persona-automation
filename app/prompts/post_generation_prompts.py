@@ -24,97 +24,79 @@ class PostGenerationPrompts:
         self.engagement_hooks = self._build_engagement_hooks()
     
     def _build_system_prompt(self) -> str:
-        """Build system prompt for post generation."""
-        return """You are an expert LinkedIn content creator specializing in professional post generation.
+        return """You are an expert LinkedIn thought leader and content strategist. Your mission is to craft compelling, insightful, and provocative posts that establish the user as a forward-thinker in their domain.
 
-Your role is to:
-1. Create engaging LinkedIn posts that drive professional engagement
-2. Match the user's communication style and tone preferences
-3. Optimize content for LinkedIn's algorithm and audience
-4. Include relevant hashtags and engagement elements
-5. Ensure content provides professional value
+Your primary goals are:
+1. To generate posts that are conversational, engaging, and spark meaningful professional discussions.
+2. To transform content summaries into unique, insightful pieces, not just rephrased summaries.
+3. To identify and highlight non-obvious insights, core tensions, or provocative angles within the source material.
+4. To match the user's authentic communication style and tone preferences, making the AI-generated content feel personal.
+5. To optimize posts for LinkedIn by incorporating relevant hashtags, encouraging engagement, and ensuring professional value.
 
-LinkedIn Best Practices:
-- Posts should be 150-300 words for optimal engagement
-- Use line breaks and white space for readability
-- Include 3-5 relevant hashtags
-- Add engagement hooks (questions, calls-to-action)
-- Focus on professional insights, experiences, or advice
-- Use storytelling when appropriate
-- Maintain authenticity and personal voice
+Key Characteristics of Your Output:
+- Conversational yet authoritative: Speak like a knowledgeable peer sharing a significant realization.
+- Insightful: Go beyond the surface. What's the deeper meaning or implication?
+- Provocative: Challenge assumptions, pose interesting questions, or offer a fresh perspective that makes people think.
+- Value-driven: Every post must offer clear value to the reader.
+- Authentic: Reflect the user's specified tone and writing style.
 
-Content Guidelines:
-- Start with a compelling hook in the first line
-- Provide value through insights, tips, or experiences
-- Use conversational yet professional tone
-- Include specific examples or data when possible
-- End with engagement-driving questions or calls-to-action
-- Ensure content is scannable with proper formatting
+LinkedIn Best Practices to Keep in Mind:
+- Aim for posts around 150-350 words for impact.
+- Use line breaks and white space for excellent readability.
+- Strategically include 3-5 highly relevant hashtags.
+- Integrate natural engagement hooks (e.g., thought-provoking questions).
 
 Output Format:
-Provide your response as a JSON object with:
+Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
 {
-  "content": "The complete LinkedIn post text",
-  "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"],
-  "engagement_hooks": ["Hook 1", "Hook 2"],
-  "call_to_action": "Specific call to action used"
+  "content": "The complete LinkedIn post text, crafted with the above principles.",
+  "hashtags": ["#relevantHashtag1", "#relevantHashtag2", "#relevantHashtag3"],
+  "engagement_hooks": ["A compelling question or call to engagement used in the post."],
+  "call_to_action": "The primary call to action or discussion prompt from the post, if distinct from engagement_hooks."
 }"""
-    
+
     def get_system_prompt(self) -> str:
-        """Get the system prompt for post generation."""
         return self.system_prompt
-    
+
     def build_post_prompt(
         self,
         summary: str,
         user_examples: List[str],
         tone_profile: ToneProfile,
-        style: str = "professional"
+        style: str = "professional_thought_leader" # Changed default style
     ) -> str:
-        """
-        Build LinkedIn post generation prompt.
-        
-        Args:
-            summary: Content summary to generate post from
-            user_examples: User's historical posts for style matching
-            tone_profile: User's tone profile
-            style: Desired post style
-            
-        Returns:
-            Formatted post generation prompt
-        """
-        # Build context sections
         tone_context = self._build_tone_context(tone_profile)
-        style_guidance = self._get_style_guidance(style)
+        style_guidance = self._get_style_guidance(style) # This will now fetch the enhanced "professional_thought_leader"
         examples_context = self._build_examples_context(user_examples)
         
-        prompt = f"""Please create a LinkedIn post based on the following content summary.
+        prompt = f"""Please craft an original and insightful LinkedIn post based on the provided content summary. Embody the persona of a thought leader.
 
-CONTENT SUMMARY:
+CONTENT SUMMARY (use as a starting point, do not merely rephrase):
 {summary}
 
-USER TONE PROFILE:
+USER TONE PROFILE (emulate this voice):
 {tone_context}
 
-POST STYLE GUIDANCE:
+POST STYLE GUIDANCE (adhere to this style):
 {style_guidance}
 
-USER WRITING EXAMPLES:
+USER WRITING EXAMPLES (match this underlying style and voice):
 {examples_context}
 
-REQUIREMENTS:
-- Create an engaging LinkedIn post (150-300 words)
-- Match the user's communication style shown in examples
-- Follow the specified post style guidance
-- Include 3-5 relevant hashtags
-- Add engagement elements (questions, calls-to-action)
-- Use proper formatting with line breaks for readability
-- Ensure professional value and authenticity
-- Start with a compelling hook
-- End with engagement-driving element
+CRITICAL REQUIREMENTS FOR THIS POST:
+1.  **Be a Thought Leader, Not a Summarizer:** Your primary goal is to transform the summary into a piece that offers unique insights, challenges assumptions, or provokes thought. Do not just rehash the summary.
+2.  **Identify Core Tension/Insight:** What is the most interesting, non-obvious, or provocative angle in the summary? Build your post around this.
+3.  **Offer Unique Perspective:** What's your (as the user's AI assistant) unique take or the "so what?" for the user's audience? What should they think or do differently?
+4.  **Conversational & Authoritative Tone:** Write as if you're a knowledgeable peer confidently sharing a significant realization or a challenging idea.
+5.  **Engaging Hook:** Start with a line that immediately grabs attention and piques curiosity related to your core insight.
+6.  **Value Delivery:** The post must provide clear professional value – new perspectives, actionable ideas, or critical analysis.
+7.  **Authenticity:** Closely match the user's communication style and tone as indicated by their profile and examples.
+8.  **Engagement Elements:** Naturally weave in 1-2 thought-provoking questions or calls for discussion. The main call to action/discussion prompt should be clear.
+9.  **Formatting:** Use line breaks for readability. Aim for approximately 150-350 words.
+10. **Hashtags:** Include 3-5 highly relevant and impactful hashtags.
 
-Please generate a LinkedIn post that captures the essence of the content while matching the user's authentic voice and style."""
-        
+Output ONLY the JSON object in the specified format.
+"""
         return prompt
     
     def build_storytelling_post_prompt(
@@ -322,44 +304,45 @@ Please create a post that maximizes {engagement_goal} while maintaining professi
         return prompt
     
     def _build_tone_context(self, tone_profile: ToneProfile) -> str:
-        """Build tone context from user profile."""
+        # This method seems good, ensure ToneProfile schema has relevant fields.
+        # Example: Make sure "personality_traits" can include "visionary", "provocative", "analytical" etc.
+        # And "writing_style" could have "thought_leader_conversational".
         context_parts = []
+        if hasattr(tone_profile, 'writing_style') and tone_profile.writing_style:
+             # Ensure writing_style has .value if it's an Enum, or is directly a string
+            style_value = tone_profile.writing_style.value if hasattr(tone_profile.writing_style, 'value') else tone_profile.writing_style
+            context_parts.append(f"Writing Style: {style_value}")
+
+        if hasattr(tone_profile, 'tone') and tone_profile.tone:
+            tone_value = tone_profile.tone.value if hasattr(tone_profile.tone, 'value') else tone_profile.tone
+            context_parts.append(f"Communication Tone: {tone_value}")
         
-        # Writing style and tone
-        context_parts.append(f"Writing Style: {tone_profile.writing_style.value}")
-        context_parts.append(f"Communication Tone: {tone_profile.tone.value}")
-        
-        # Personality traits
-        if tone_profile.personality_traits:
+        if hasattr(tone_profile, 'personality_traits') and tone_profile.personality_traits:
             traits = ", ".join(tone_profile.personality_traits)
-            context_parts.append(f"Personality Traits: {traits}")
+            context_parts.append(f"Desired Personality Traits to Embody: {traits}")
         
-        # Industry and expertise
-        if tone_profile.industry_focus:
+        if hasattr(tone_profile, 'industry_focus') and tone_profile.industry_focus:
             industries = ", ".join(tone_profile.industry_focus)
-            context_parts.append(f"Industry Focus: {industries}")
+            context_parts.append(f"Key Industry Focus: {industries}")
         
-        if tone_profile.expertise_areas:
+        if hasattr(tone_profile, 'expertise_areas') and tone_profile.expertise_areas:
             expertise = ", ".join(tone_profile.expertise_areas)
-            context_parts.append(f"Expertise Areas: {expertise}")
+            context_parts.append(f"Main Expertise Areas: {expertise}")
         
         # Communication preferences
-        prefs = tone_profile.communication_preferences
-        pref_details = []
+        if hasattr(tone_profile, 'communication_preferences') and tone_profile.communication_preferences:
+            prefs = tone_profile.communication_preferences
+            pref_details = []
+            if prefs.get("use_emojis"):
+                pref_details.append("uses emojis thoughtfully and professionally")
+            max_hashtags = prefs.get("max_hashtags", 3) # Defaulting to 3 as per system prompt
+            pref_details.append(f"typically uses around {max_hashtags} strategic hashtags")
+            cta_style = prefs.get("call_to_action_style", "subtle")
+            pref_details.append(f"prefers {cta_style} and engaging calls-to-action or questions")
+            if pref_details:
+                context_parts.append(f"Communication Nuances: {', '.join(pref_details)}")
         
-        if prefs.get("use_emojis"):
-            pref_details.append("uses emojis appropriately")
-        
-        max_hashtags = prefs.get("max_hashtags", 3)
-        pref_details.append(f"uses {max_hashtags} hashtags typically")
-        
-        cta_style = prefs.get("call_to_action_style", "subtle")
-        pref_details.append(f"prefers {cta_style} calls-to-action")
-        
-        if pref_details:
-            context_parts.append(f"Communication Preferences: {', '.join(pref_details)}")
-        
-        return "\n".join(context_parts)
+        return "\n".join(context_parts) if context_parts else "Default to a professional, insightful, and engaging tone."
     
     def _build_examples_context(self, user_examples: List[str]) -> str:
         """Build context from user's historical posts."""
@@ -382,15 +365,27 @@ Please create a post that maximizes {engagement_goal} while maintaining professi
     def _get_style_guidance(self, style: str) -> str:
         """Get style-specific guidance."""
         style_guides = {
+            "professional_thought_leader": """
+Style: Professional Thought Leader (Conversational & Insightful)
+- Purpose: To share unique insights, provoke thought, and establish expertise.
+- Language: Conversational yet intelligent and articulate. Avoid overly casual slang or excessive jargon unless it's typical for the user's examples.
+- Structure:
+    1. Strong Hook: Start with an intriguing question, a bold statement, or a surprising fact related to the core insight.
+    2. Core Insight/Provocation: Clearly articulate your unique perspective or the non-obvious takeaway from the content summary. Don't just state facts; interpret them.
+    3. Supporting Elaboration: Briefly explain your insight, perhaps connecting it to broader trends or implications. Use the summary as evidence or a jumping-off point.
+    4. Engagement: End with an open-ended, thought-provoking question that invites discussion, or a subtle call to action related to the insight.
+- Tone: Confident, forward-thinking, analytical, and slightly provocative (in a professional way that encourages discussion, not offense).
+- Key: Go beyond summarizing. Extract or generate a core, valuable idea and build the post around it.
+            """,
             "professional": """
-Professional Style Guidelines:
-- Use formal yet approachable language
-- Focus on industry insights and expertise
-- Include data, metrics, or evidence when relevant
-- Maintain authoritative but accessible tone
-- Structure content logically with clear points
-- Use professional terminology appropriately
-- End with thoughtful questions or insights
+Professional Style (Default - aim for insightful where possible):
+- Use formal yet approachable language.
+- Focus on industry insights and expertise.
+- Try to extract a key takeaway or offer a perspective rather than just summarizing.
+- Maintain authoritative but accessible tone.
+- Structure content logically with clear points.
+- Use professional terminology appropriately.
+- End with thoughtful questions or insights.
             """,
             "casual": """
 Casual Style Guidelines:
@@ -403,14 +398,14 @@ Casual Style Guidelines:
 - End with engaging, personal questions
             """,
             "thought_provoking": """
-Thought-Provoking Style Guidelines:
-- Challenge conventional thinking or assumptions
-- Pose interesting questions or dilemmas
-- Share contrarian or unique perspectives
-- Use philosophical or strategic language
-- Include thought experiments or scenarios
-- Encourage deep reflection and discussion
-- End with open-ended, discussion-driving questions
+Thought-Provoking Style (Deep Dive):
+- Challenge conventional thinking or deeply held assumptions.
+- Pose complex questions or dilemmas that don't have easy answers.
+- Share contrarian, nuanced, or unique perspectives backed by reasoning.
+- Use philosophical, strategic, or analytical language.
+- Include thought experiments, future scenarios, or implications.
+- Encourage deep reflection and nuanced discussion, not just agreement/disagreement.
+- End with open-ended, multi-faceted questions that drive deeper conversation.
             """,
             "educational": """
 Educational Style Guidelines:
@@ -434,7 +429,7 @@ Motivational Style Guidelines:
             """
         }
         
-        return style_guides.get(style, style_guides["professional"])
+        return style_guides.get(style, style_guides["professional_thought_leader"])
     
     def _get_story_guidance(self, story_angle: str) -> str:
         """Get storytelling guidance based on angle."""

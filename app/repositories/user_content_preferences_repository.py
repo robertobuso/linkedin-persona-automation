@@ -6,7 +6,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user_content_preferences import UserContentPreferences
 from app.repositories.base import BaseRepository, NotFoundError, DuplicateError

@@ -220,9 +220,23 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         Returns:
             True if URL exists, False otherwise
         """
-        stmt = select(ContentItem).where(ContentItem.url == url)
+        # This method can be simplified to use get_by_url
+        existing_item = await self.get_by_url(url)
+        return existing_item is not None
+
+    async def get_by_url(self, url: str) -> Optional[ContentItem]:
+        """
+        Get a content item by its URL.
+        
+        Args:
+            url: The URL of the content item.
+            
+        Returns:
+            The ContentItem instance if found, otherwise None.
+        """
+        stmt = select(self.model).where(self.model.url == url)
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none() is not None
+        return result.scalar_one_or_none()
     
     async def get_items_by_source(
         self, 

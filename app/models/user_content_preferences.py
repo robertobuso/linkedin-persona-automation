@@ -1,15 +1,15 @@
-# app/models/user_content_preferences.py
 """
 Enhanced user content preferences model for LinkedIn Presence Automation Application.
 
 Defines comprehensive content preference management with versioning and validation.
 """
 
-import uuid
+import uuid as python_uuid_module
+from uuid import UUID as PythonNativeUUID
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import Column, String, DateTime, Boolean, Text, Integer, ForeignKey, Float
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID as SQLAlchemyPGUUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pydantic import BaseModel, Field, validator
@@ -24,8 +24,8 @@ class UserContentPreferences(Base):
     
     __tablename__ = "user_content_preferences"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(SQLAlchemyPGUUID(as_uuid=True), primary_key=True, default=python_uuid_module.uuid4, index=True)
+    user_id = Column(SQLAlchemyPGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Professional context
     job_role = Column(String(100), nullable=True)
@@ -256,8 +256,8 @@ class ContentPreferencesUpdate(BaseModel):
 
 class ContentPreferencesResponse(BaseModel):
     """Schema for content preferences response."""
-    id: str
-    user_id: str
+    id: PythonNativeUUID
+    user_id: PythonNativeUUID
     job_role: Optional[str]
     industry: Optional[str]
     experience_level: str
@@ -285,8 +285,8 @@ class ContentPreferencesResponse(BaseModel):
     learn_from_interactions: bool
     feedback_weight: float
     preferences_version: int
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True

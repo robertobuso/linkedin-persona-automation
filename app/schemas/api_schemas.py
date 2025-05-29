@@ -230,19 +230,21 @@ class PostDraftUpdate(BaseModel):
     scheduled_for: Optional[datetime] = Field(None, description="Scheduled time")
 
 
-class PostDraftResponse(BaseResponseModel):
+class PostDraftResponse(BaseResponseModel): 
     """Schema for post draft response."""
-    id: str = Field(..., description="Draft ID")
-    user_id: str = Field(..., description="User ID")
+    id: UUID = Field(..., description="Draft ID") # Changed to UUID
+    user_id: UUID = Field(..., description="User ID") # Changed to UUID
+    # source_content_id: Optional[UUID] = Field(None, description="Source Content ID") # Add if this is part of the response and is a UUID
     content: str = Field(..., description="Post content")
     hashtags: List[str] = Field(default_factory=list, description="Post hashtags")
     title: Optional[str] = Field(None, description="Post title")
-    status: str = Field(..., description="Draft status")
+    status: str = Field(..., description="Draft status") # Assuming DraftStatus enum is converted to string by FastAPI
     scheduled_for: Optional[datetime] = Field(None, description="Scheduled time")
     published_at: Optional[datetime] = Field(None, description="Publication time")
     linkedin_post_id: Optional[str] = Field(None, description="LinkedIn post ID")
     linkedin_post_url: Optional[str] = Field(None, description="LinkedIn post URL")
     created_at: datetime = Field(..., description="Creation time")
+    # updated_at: Optional[datetime] = Field(None, description="Last update time") # Add if needed
     
     class Config:
         from_attributes = True

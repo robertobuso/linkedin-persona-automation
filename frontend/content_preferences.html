@@ -273,6 +273,12 @@
     </div>
     
     <script>
+        // Set this specifically for this page if it's not served by the proxied dev server
+        window.APP_CONFIG = {
+            API_BASE_URL: 'http://localhost:8000/api/v1' // Points directly to your FastAPI backend
+        };
+    </script>
+    <script>
         const interests = [
             { id: 'ai_ml', label: '🤖 AI & Machine Learning', selected: false },
             { id: 'software_engineering', label: '💻 Software Engineering', selected: false },
@@ -376,8 +382,63 @@ Articles per day: ${articleCount}
 The AI will use these preferences to select the most relevant articles for you.`);
         }
         
-        function savePreferences() {
-            const preferences = {
+        const API_BASE = window.APP_CONFIG?.API_BASE_URL || '/api/v1'; // Will now pick up the absolute URL
+
+        async function apiCall(endpoint, options = {}) {
+            // 1. Use 'token' and ensure 'localStorage.getItem' uses the correct key
+            const token = localStorage.getItem('token'); // Or 'accessToken' if that's your actual key
+            // If your key in localStorage is 'accessToken', use:
+            // const token = localStorage.getItem('accessToken'); 
+
+            if (!token && !options.isPublic) { // Assuming some endpoints might be public
+                throw new Error('Authentication token not found. Please log in.');
+            }
+
+            const defaultHeaders = {
+                'Content-Type': 'application/json',
+            };
+            if (token && !options.isPublic) { // 2. Use the 'token' variable here
+                defaultHeaders['Authorization'] = `Bearer ${token}`;
+            }
+
+            const config = {
+                ...options,
+                headers: {
+                    ...defaultHeaders,
+                    ...options.headers,
+                },
+            };
+
+            const response = await fetch(`${API_BASE}${endpoint}`, config);
+
+            if (!response.ok) {
+                let errorDetail = `HTTP error! status: ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData && errorData.detail) {
+                        if (Array.isArray(errorData.detail)) {
+                            errorDetail = errorData.detail.map(err => `${err.loc.join('.')} - ${err.msg}`).join('; ');
+                        } else {
+                            errorDetail = errorData.detail;
+                        }
+                    }
+                } catch (e) {
+                    errorDetail = response.statusText || errorDetail;
+                }
+                throw new Error(errorDetail);
+            }
+
+            if (response.status === 204 || (options.method === 'DELETE' && response.headers.get("content-length") === "0")) {
+                return null; 
+            }
+            
+            return response.json();
+        }
+
+        async function savePreferences() {
+            // No need to get authToken here, apiCall will handle it.
+
+            const payload = {
                 jobRole: document.getElementById('jobRole').value,
                 industry: document.getElementById('industry').value,
                 interests: interests.filter(i => i.selected).map(i => i.id),
@@ -386,13 +447,32 @@ The AI will use these preferences to select the most relevant articles for you.`
                 maxArticlesPerDay: parseInt(document.getElementById('articleCountSlider').value)
             };
             
-            // In real implementation, this would make an API call
-            console.log('Saving preferences:', preferences);
+            console.log('Attempting to save preferences with payload:', payload);
             
-            // Simulate API call
-            setTimeout(() => {
+            // Disable button to prevent multiple clicks
+            const saveButton = document.querySelector('.btn-primary[onclick="savePreferences()"]');
+            if (saveButton) saveButton.disabled = true;
+
+
+            try {
+                // Using the new apiCall utility
+                const result = await apiCall('/preferences/quick-setup', {
+                    method: 'POST',
+                    body: JSON.stringify(payload),
+                });
+
+                console.log('User preferences saved successfully via API:', result);
                 alert('✅ Preferences saved successfully! Your content feed will be updated within the next hour.');
-            }, 500);
+                // Optionally, you could reload current preferences or update UI fields
+                // loadPreferences(); // If you implement a function to fetch and populate the form
+
+            } catch (error) {
+                console.error('Error saving preferences:', error);
+                alert(`❌ Error saving preferences: ${error.message}`);
+            } finally {
+                // Re-enable button
+                if (saveButton) saveButton.disabled = false;
+            }
         }
         
         // Initialize

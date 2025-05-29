@@ -5,6 +5,10 @@ Provides endpoints for managing content sources, viewing content feed,
 and triggering content ingestion processes.
 """
 
+from app.services.enhanced_content_ingestion import EnhancedContentIngestionService
+import redis.asyncio as redis
+import os
+import asyncio
 from typing import Any, List, Optional
 from uuid import UUID # Import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
@@ -35,6 +39,13 @@ from app.models.user import User
 from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
 
 router = APIRouter()
+
+redis_client = None
+try:
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0") 
+    redis_client = redis.from_url(redis_url, decode_responses=False)
+except Exception as e:
+    logger.warning(f"Redis connection failed: {str(e)}. Caching will be disabled.")
 
 # Helper function for background source processing (if not using Celery for this specific one)
 async def _process_source_background(source_id_str: str):
@@ -257,38 +268,136 @@ async def get_content_feed(
 
 @router.post("/trigger-ingestion", response_model=ContentIngestionResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_content_ingestion(
-    background_tasks: BackgroundTasks, # Keep this if you want FastAPI to manage it directly
-    source_id: Optional[UUID] = Query(None, description="Specific source to process"), # Changed to UUID
+    background_tasks: BackgroundTasks,
+    source_id: Optional[UUID] = Query(None, description="Specific source to process"),
+    force_refresh: bool = Query(False, description="Force refresh bypassing cache"),
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentIngestionResponse:
-    """Trigger content ingestion process."""
-    task_id_str: Optional[str] = None
+    """Trigger enhanced content ingestion with LLM selection."""
+    
+    async with db_session_cm as session:
+        try:
+            # Use enhanced ingestion service instead of basic one
+            enhanced_service = EnhancedContentIngestionService(session, redis_client)
+            
+            if source_id:
+                # Process specific source (keep existing logic)
+                source_repo = ContentSourceRepository(session)
+                source = await source_repo.get_by_id(source_id)
+                
+                if not source or source.user_id != current_user.id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
+                
+                # For now, use Celery task for source-specific processing
+                from app.tasks.content_tasks import process_source_task
+                task = process_source_task.delay(str(source_id))
+                
+                return ContentIngestionResponse(
+                    task_id=task.id,
+                    status="accepted",
+                    message=f"Content ingestion started for source {source_id}"
+                )
+            else:
+                # Use enhanced LLM-based selection for user's content
+                logger.info(f"Starting enhanced content ingestion for user {current_user.id}")
+                
+                # Process content with LLM selection
+                selection_result = await enhanced_service.process_content_with_llm_selection(
+                    current_user.id,
+                    force_refresh=force_refresh
+                )
+                
+                # Trigger deep analysis for selected articles
+                if selection_result.selected_articles:
+                    background_tasks.add_task(
+                        _trigger_deep_analysis,
+                        current_user.id,
+                        selection_result.selected_articles
+                    )
+                
+                return ContentIngestionResponse(
+                    task_id=None,  # No Celery task for LLM selection
+                    status="completed",
+                    message=f"Enhanced content ingestion completed: {len(selection_result.selected_articles)} articles selected"
+                )
+                
+        except Exception as e:
+            logger.error(f"Enhanced content ingestion failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Content ingestion failed: {str(e)}"
+            )
 
-    async with db_session_cm as session: # Session needed for source verification
-        if source_id:
-            source_repo = ContentSourceRepository(session)
-            source = await source_repo.get_by_id(source_id)
+async def _trigger_deep_analysis(user_id: UUID, selected_articles: List[dict[str, Any]]):
+    """Background task to trigger deep analysis for selected articles."""
+    try:
+        logger.info(f"Starting deep analysis for {len(selected_articles)} articles for user {user_id}")
+        
+        from app.database.connection import get_db_session
+        async with get_db_session() as session:
+            from app.services.deep_content_analysis import DeepContentAnalysisService
+            
+            analysis_service = DeepContentAnalysisService(session)
+            
+            # Analyze each selected article
+            for article_data in selected_articles:
+                try:
+                    await analysis_service.batch_analyze_selected_content(
+                        user_id=user_id,
+                        selected_articles=[article_data]
+                    )
+                    
+                    # Add small delay to avoid overwhelming the system
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to analyze article {article_data.get('title', 'Unknown')}: {str(e)}")
+                    continue
+                    
+        logger.info(f"Deep analysis completed for user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Deep analysis background task failed: {str(e)}")
 
-            if not source or source.user_id != current_user.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
-
-            # Using Celery task as defined in app.tasks.content_tasks
-            task = process_source_task.delay(str(source_id))
-            task_id_str = task.id
-            message = f"Content ingestion started for source {source_id}"
-        else:
-            from app.tasks.content_tasks import discover_content_task # Ensure this task exists
-            task = discover_content_task.delay(str(current_user.id))
-            task_id_str = task.id
-            message = "Content ingestion started for all user sources"
-
-    return ContentIngestionResponse(
-        task_id=task_id_str,
-        status="accepted", # More accurate for task submission
-        message=message
-    )
-
+# Add new endpoint for LLM content selection
+@router.post("/select-content", response_model=dict[str, Any])
+async def select_relevant_content(
+    force_refresh: bool = Query(False, description="Force new selection, bypassing cache"),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict[str, Any]:
+    """
+    Select relevant content for user using LLM-based selection.
+    
+    This endpoint implements Phase 2 of the content discovery pipeline.
+    """
+    async with db_session_cm as session:
+        try:
+            enhanced_service = EnhancedContentIngestionService(session, redis_client)
+            
+            selection_result = await enhanced_service.process_content_with_llm_selection(
+                current_user.id,
+                force_refresh=force_refresh
+            )
+            
+            return {
+                "selected_articles": selection_result.selected_articles,
+                "selection_metadata": {
+                    "articles_selected": len(selection_result.selected_articles),
+                    "selection_timestamp": selection_result.selection_timestamp.isoformat(),
+                    "processing_details": selection_result.processing_details,
+                    "cached": not force_refresh and selection_result.processing_details.get("processing_time_seconds", 0) < 0.1
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Content selection failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Content selection failed: {str(e)}"
+            )
+        
 
 @router.post("/validate-feed", response_model=FeedValidationResponse)
 async def validate_feed_url_endpoint( # Renamed to avoid conflict with any imported validate_feed_url
@@ -315,14 +424,24 @@ async def get_content_stats(
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentStatsResponse:
-    """Get content processing statistics for user."""
+    """Get enhanced content processing statistics for user."""
     async with db_session_cm as session:
         try:
-            ingestion_service = ContentIngestionService(session)
-            stats = await ingestion_service.get_processing_stats(current_user.id)
-            return stats  # ✅ already a ContentStatsResponse instance
+            # Use enhanced service for stats
+            enhanced_service = EnhancedContentIngestionService(session, redis_client)
+            
+            # Try to get enhanced stats, fallback to basic stats if needed
+            try:
+                stats = await enhanced_service.get_processing_stats(current_user.id)
+                return stats
+            except AttributeError:
+                # Fallback to basic ingestion service if enhanced stats not available
+                ingestion_service = ContentIngestionService(session)
+                stats = await ingestion_service.get_processing_stats(current_user.id)
+                return stats
+            
         except Exception as e:
-            logger.error(f"Failed to get content stats: {e}", exc_info=True)
+            logger.error(f"Failed to get enhanced content stats: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get content stats: {str(e)}"

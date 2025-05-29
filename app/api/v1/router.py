@@ -6,7 +6,14 @@ centralized route configuration.
 """
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, content, drafts, engagement, analytics
+from app.api.v1.endpoints import (
+    auth,
+    content,
+    drafts,
+    engagement,
+    analytics,
+    preferences
+)
 
 # Create main API router
 api_router = APIRouter()
@@ -41,3 +48,11 @@ api_router.include_router(
     prefix="/analytics",
     tags=["Analytics"]
 )
+
+# --- ADD THIS SECTION ---
+api_router.include_router(
+    preferences.router,  # <--- Use the imported module
+    prefix="/preferences", # <--- The prefix the frontend is expecting
+    tags=["Preferences Management"] # <--- A descriptive tag for your API docs
+)
+# ------------------------

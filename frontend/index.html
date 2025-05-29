@@ -575,6 +575,14 @@
                 {user && (
                     <div className="user-menu">
                         <span>Welcome, {user.full_name || user.email}</span>
+                        <a 
+                            href="/content_preferences.html" 
+                            className="btn btn-secondary"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            ⚙️ Content Preferences
+                        </a>
                         <button className="btn btn-secondary" onClick={onLogout}>
                             Logout
                         </button>
@@ -727,42 +735,11 @@
                     <aside className="sidebar">
                         <h3>Navigation</h3>
                         <ul className="nav-menu">
-                            <li>
-                                <a 
-                                    href="#" 
-                                    className={activeTab === 'overview' ? 'active' : ''}
-                                    onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}
-                                >
-                                    📊 Overview
-                                </a>
-                            </li>
-                            <li>
-                                <a 
-                                    href="#" 
-                                    className={activeTab === 'sources' ? 'active' : ''}
-                                    onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}
-                                >
-                                    📡 Content Sources
-                                </a>
-                            </li>
-                            <li>
-                                <a 
-                                    href="#" 
-                                    className={activeTab === 'feed' ? 'active' : ''}
-                                    onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}
-                                >
-                                    📰 Content Feed
-                                </a>
-                            </li>
-                            <li>
-                                <a 
-                                    href="#" 
-                                    className={activeTab === 'drafts' ? 'active' : ''}
-                                    onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}
-                                >
-                                    ✏️ Post Drafts
-                                </a>
-                            </li>
+                            <li><a href="#" className={activeTab === 'overview' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}>📊 Overview</a></li>
+                            <li><a href="#" className={activeTab === 'sources' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}>📡 Content Sources</a></li>
+                            <li><a href="#" className={activeTab === 'feed' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}>📰 Content Feed</a></li>
+                            <li><a href="#" className={activeTab === 'drafts' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}>✏️ Post Drafts</a></li>
+                            <li><a href="#" className={activeTab === 'preferences' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('preferences'); }}>⚙️ Preferences</a></li>
                         </ul>
                     </aside>
 
@@ -771,6 +748,7 @@
                         {activeTab === 'sources' && <SourcesTab />}
                         {activeTab === 'feed' && <FeedTab />}
                         {activeTab === 'drafts' && <DraftsTab />}
+                        {activeTab === 'preferences' && <PreferencesTab />}
                     </div>
                 </div>
             );
@@ -918,8 +896,8 @@
             const triggerContentIngestion = async (sourceId = null) => {
                 try {
                     const url = sourceId ? 
-                        `/content/trigger-ingestion?source_id=${sourceId}` : 
-                        '/content/trigger-ingestion';
+                        `/content/trigger-ingestion?source_id=${sourceId}&force_refresh=true` : 
+                        '/content/trigger-ingestion?force_refresh=true';
                     
                     await apiCall(url, {
                         method: 'POST'
@@ -1201,11 +1179,136 @@
             );
         };
 
-        // Feed Tab
+        // Preferences Tab Component
+        const PreferencesTab = () => {
+            const [preferences, setPreferences] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState('');
+            const { apiCall, addToast } = useApi();
+
+            useEffect(() => {
+                loadPreferences();
+            }, []);
+
+            const loadPreferences = async () => {
+                try {
+                    const data = await apiCall('/preferences/preferences');
+                    setPreferences(data);
+                } catch (err) {
+                    // If no preferences exist, that's OK
+                    if (err.message.includes('not found')) {
+                        setPreferences(null);
+                    } else {
+                        setError(err.message);
+                    }
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const triggerContentSelection = async () => {
+                try {
+                    setLoading(true);
+                    const result = await apiCall('/content/select-content', {
+                        method: 'POST'
+                    });
+                    
+                    addToast(`Content selection completed! ${result.selection_metadata.articles_selected} articles selected`, 'success');
+                    
+                } catch (err) {
+                    addToast('Content selection failed: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading) {
+                return <div className="loading">Loading preferences...</div>;
+            }
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Content Preferences</h2>
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={triggerContentSelection}
+                                disabled={loading}
+                            >
+                                🎯 Select Content
+                            </button>
+                            <a 
+                                href="/content_preferences.html" 
+                                className="btn btn-primary"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                ⚙️ Manage Preferences
+                            </a>
+                        </div>
+                    </div>
+
+                    {error && (
+                        <div className="alert alert-error">{error}</div>
+                    )}
+
+                    {preferences ? (
+                        <div className="card">
+                            <h3>Current Preferences</h3>
+                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem'}}>
+                                {preferences.job_role && (
+                                    <div><strong>Job Role:</strong> {preferences.job_role}</div>
+                                )}
+                                {preferences.industry && (
+                                    <div><strong>Industry:</strong> {preferences.industry}</div>
+                                )}
+                                <div><strong>Max Articles/Day:</strong> {preferences.max_articles_per_day}</div>
+                                <div><strong>Relevance Threshold:</strong> {Math.round(preferences.min_relevance_score * 100)}%</div>
+                            </div>
+                            
+                            {preferences.primary_interests && preferences.primary_interests.length > 0 && (
+                                <div style={{marginBottom: '1rem'}}>
+                                    <strong>Primary Interests:</strong>
+                                    <div style={{marginTop: '0.5rem'}}>
+                                        {preferences.primary_interests.map(interest => (
+                                            <span key={interest} className="tag">{interest}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {preferences.custom_prompt && (
+                                <div>
+                                    <strong>Custom Instructions:</strong>
+                                    <p style={{fontStyle: 'italic', marginTop: '0.5rem'}}>{preferences.custom_prompt}</p>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="empty-state">
+                            <h3>No preferences configured</h3>
+                            <p>Set up your content preferences to get personalized article recommendations!</p>
+                            <a 
+                                href="/content_preferences.html" 
+                                className="btn btn-primary"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                Set Up Preferences
+                            </a>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // FeedTab
         const FeedTab = () => {
             const [content, setContent] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState('');
+            const { apiCall, addToast } = useApi();
 
             useEffect(() => {
                 loadContent();
@@ -1228,7 +1331,33 @@
 
             return (
                 <div>
-                    <h2>Content Feed</h2>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Content Feed</h2>
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={async () => {
+                                    try {
+                                        await apiCall('/content/select-content', { method: 'POST' });
+                                        addToast('Smart content selection completed!', 'success');
+                                        loadContent(); // Refresh feed
+                                    } catch (err) {
+                                        addToast('Content selection failed: ' + err.message, 'error');
+                                    }
+                                }}
+                                disabled={loading}
+                            >
+                                🧠 Smart Selection
+                            </button>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={loadContent}
+                                disabled={loading}
+                            >
+                                🔄 Refresh
+                            </button>
+                        </div>
+                    </div>
 
                     {error && (
                         <div className="alert alert-error">{error}</div>
