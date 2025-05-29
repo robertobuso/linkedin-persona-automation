@@ -1,13 +1,13 @@
 """
-Content extraction utilities for LinkedIn Presence Automation Application.
+Fixed content extraction utilities without hard-coded AI-only filtering.
 
 Provides utilities for extracting full article content from URLs using
-Playwright and BeautifulSoup with intelligent content detection.
+Playwright and BeautifulSoup with user-configurable content detection.
 """
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, urljoin
 import re
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
@@ -99,26 +99,111 @@ class ContentExtractor:
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
     
-    @staticmethod
-    def is_ai_related(text: str) -> bool:
-        AI_KEYWORDS = [
-            "artificial intelligence", "AI", "machine learning", "deep learning",
-            "large language model", "LLM", "neural network", "OpenAI", "Anthropic",
-            "ChatGPT", "Claude", "Gemini", "transformer", "NLP", "Generative AI",
-            "foundation model", "data science"
-        ]
-        text_lower = text.lower()
-        return any(keyword.lower() in text_lower for keyword in AI_KEYWORDS)
-
-    async def extract_full_content(self, url: str) -> Optional[str]:
+    def check_content_relevance(
+        self, 
+        text: str, 
+        user_interests: List[str], 
+        custom_filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
-        Extract full article content from URL.
+        Check content relevance based on user interests instead of hard-coded AI filter.
+        
+        Args:
+            text: Content text to analyze
+            user_interests: List of user interest keywords/topics
+            custom_filters: Optional additional filtering criteria
+            
+        Returns:
+            Dictionary with relevance analysis
+        """
+        text_lower = text.lower()
+        custom_filters = custom_filters or {}
+        
+        # Basic relevance scoring
+        relevance_score = 0.0
+        matching_interests = []
+        
+        # Check against user interests
+        for interest in user_interests:
+            interest_lower = interest.lower()
+            if interest_lower in text_lower:
+                relevance_score += 1.0
+                matching_interests.append(interest)
+                
+                # Boost score for title matches
+                title_section = text[:200].lower()
+                if interest_lower in title_section:
+                    relevance_score += 0.5
+        
+        # Normalize score
+        if user_interests:
+            relevance_score = min(1.0, relevance_score / len(user_interests))
+        else:
+            relevance_score = 0.5  # Default for users with no specified interests
+        
+        # Apply custom filters
+        blocked_keywords = custom_filters.get("blocked_keywords", [])
+        for blocked in blocked_keywords:
+            if blocked.lower() in text_lower:
+                relevance_score *= 0.1  # Heavily penalize blocked content
+                break
+        
+        # Check for spam patterns
+        spam_score = self._calculate_spam_score(text)
+        relevance_score *= (1.0 - spam_score)
+        
+        return {
+            "relevance_score": relevance_score,
+            "matching_interests": matching_interests,
+            "spam_score": spam_score,
+            "blocked": relevance_score < 0.1,
+            "reason": "User interests match" if matching_interests else "No specific interests matched"
+        }
+    
+    def _calculate_spam_score(self, text: str) -> float:
+        """Calculate spam probability score."""
+        text_lower = text.lower()
+        
+        spam_indicators = [
+            "click here", "buy now", "limited time", "act fast", "guaranteed",
+            "make money", "earn $", "free trial", "subscribe now", "don't miss out",
+            "urgent", "exclusive offer", "act now", "limited offer"
+        ]
+        
+        spam_count = sum(1 for indicator in spam_indicators if indicator in text_lower)
+        
+        # Check for excessive promotional language
+        promo_patterns = [
+            r'\b\d+%\s+off\b',
+            r'\$\d+',
+            r'\bfree\b.*\b(trial|shipping|delivery)\b',
+            r'\bbest\s+(deal|offer|price)\b'
+        ]
+        
+        pattern_count = sum(1 for pattern in promo_patterns if re.search(pattern, text_lower))
+        
+        # Calculate spam score (0 = no spam, 1 = definitely spam)
+        total_indicators = spam_count + pattern_count
+        spam_score = min(1.0, total_indicators / 10.0)
+        
+        return spam_score
+
+    async def extract_full_content(
+        self, 
+        url: str, 
+        user_interests: Optional[List[str]] = None,
+        custom_filters: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract full article content from URL with user-based relevance filtering.
         
         Args:
             url: URL to extract content from
+            user_interests: List of user interests for relevance checking
+            custom_filters: Optional custom filtering criteria
             
         Returns:
-            Extracted content text or None if failed
+            Dictionary with extracted content and metadata, or None if not relevant
         """
         try:
             logger.info(f"Extracting content from: {url}")
@@ -131,13 +216,34 @@ class ContentExtractor:
             if content and len(content) >= 200:
                 # Clean and process content
                 cleaned_content = self._clean_content(content)
-
-                if not self.is_ai_related(cleaned_content):  # Correct function call
-                    logger.info(f"Filtered out non-AI content from {url}")
+                
+                # Check relevance based on user interests (not hard-coded AI filter)
+                relevance_analysis = self.check_content_relevance(
+                    cleaned_content, 
+                    user_interests or [], 
+                    custom_filters
+                )
+                
+                # Extract metadata
+                metadata = self.extract_metadata_from_content(cleaned_content)
+                
+                result = {
+                    "content": cleaned_content,
+                    "relevance_analysis": relevance_analysis,
+                    "metadata": metadata,
+                    "word_count": len(cleaned_content.split()),
+                    "character_count": len(cleaned_content),
+                    "extraction_url": url,
+                    "extraction_method": "playwright" if await self._extract_with_playwright(url) else "requests"
+                }
+                
+                # Only filter out if explicitly blocked or spam
+                if relevance_analysis["blocked"]:
+                    logger.info(f"Content filtered out: {relevance_analysis['reason']} from {url}")
                     return None
-
-                logger.info(f"Successfully extracted {len(cleaned_content)} characters from {url}")
-                return cleaned_content
+                
+                logger.info(f"Successfully extracted content from {url} (relevance: {relevance_analysis['relevance_score']:.2f})")
+                return result
             
             logger.warning(f"Could not extract sufficient content from {url}")
             return None
@@ -146,7 +252,6 @@ class ContentExtractor:
             logger.error(f"Content extraction failed for {url}: {str(e)}")
             return None
 
-    
     async def _extract_with_playwright(self, url: str) -> Optional[str]:
         """
         Extract content using Playwright for JavaScript-rendered pages.
@@ -164,7 +269,7 @@ class ContentExtractor:
         try:
             page = await self.context.new_page()
             
-            # Block unnecessary resources
+            # Block unnecessary resources to speed up loading
             await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,mp4,mp3}", 
                            lambda route: route.abort())
             
@@ -374,6 +479,97 @@ class ContentExtractor:
         except Exception as e:
             logger.error(f"Content cleaning failed: {str(e)}")
             return content
+    
+    def extract_metadata_from_content(self, content: str) -> Dict[str, Any]:
+        """
+        Extract metadata from content for better processing.
+        
+        Args:
+            content: Cleaned content text
+            
+        Returns:
+            Dictionary with content metadata
+        """
+        try:
+            # Basic statistics
+            word_count = len(content.split())
+            char_count = len(content)
+            
+            # Extract first paragraph as summary
+            paragraphs = content.split('\n\n')
+            summary = paragraphs[0] if paragraphs else content[:200]
+            
+            # Estimate reading time (average 200 words per minute)
+            reading_time_minutes = max(1, word_count // 200)
+            
+            # Extract potential key phrases (simple approach)
+            sentences = content.split('. ')
+            key_sentences = [s.strip() for s in sentences[:3] if len(s.strip()) > 50]
+            
+            return {
+                "word_count": word_count,
+                "character_count": char_count,
+                "summary": summary[:300] + "..." if len(summary) > 300 else summary,
+                "reading_time_minutes": reading_time_minutes,
+                "key_sentences": key_sentences,
+                "content_type": self._classify_content_type(content),
+                "complexity_score": self._calculate_complexity_score(content)
+            }
+            
+        except Exception as e:
+            logger.error(f"Metadata extraction failed: {str(e)}")
+            return {
+                "word_count": len(content.split()),
+                "character_count": len(content),
+                "summary": content[:300],
+                "reading_time_minutes": 1,
+                "key_sentences": [],
+                "content_type": "article",
+                "complexity_score": 0.5
+            }
+    
+    def _classify_content_type(self, content: str) -> str:
+        """Classify content type based on patterns."""
+        content_lower = content.lower()
+        
+        if any(word in content_lower for word in ["tutorial", "how to", "step by step", "guide"]):
+            return "tutorial"
+        elif any(word in content_lower for word in ["analysis", "research", "study", "findings"]):
+            return "analysis"
+        elif any(word in content_lower for word in ["news", "announced", "today", "breaking"]):
+            return "news"
+        elif any(word in content_lower for word in ["opinion", "perspective", "think", "believe"]):
+            return "opinion"
+        else:
+            return "article"
+    
+    def _calculate_complexity_score(self, content: str) -> float:
+        """Calculate content complexity score (0-1)."""
+        try:
+            words = content.split()
+            
+            # Average word length
+            avg_word_length = sum(len(word) for word in words) / len(words) if words else 0
+            
+            # Average sentence length
+            sentences = content.split('. ')
+            avg_sentence_length = len(words) / len(sentences) if sentences else 0
+            
+            # Technical terms (basic heuristic)
+            technical_indicators = sum(1 for word in words if len(word) > 10)
+            technical_ratio = technical_indicators / len(words) if words else 0
+            
+            # Combine metrics (normalize to 0-1)
+            complexity = (
+                min(1.0, avg_word_length / 10.0) * 0.3 +
+                min(1.0, avg_sentence_length / 30.0) * 0.4 +
+                min(1.0, technical_ratio * 10) * 0.3
+            )
+            
+            return complexity
+            
+        except Exception:
+            return 0.5
     
     def extract_metadata(self, html: str) -> Dict[str, Any]:
         """
