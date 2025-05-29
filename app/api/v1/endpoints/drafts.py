@@ -12,6 +12,9 @@ import logging # For logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select # Make sure this is imported
+from sqlalchemy.orm import selectinload, joinedload # Import eager loading options
+from app.models.content import ContentItem, ContentSource
 
 from app.core.security import get_current_active_user # Ensure this is correctly defined and working
 from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager decorated dependency
@@ -85,11 +88,9 @@ async def get_drafts(
 @router.post("", response_model=PostDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_draft(
     draft_data: PostDraftCreate,
-    # background_tasks: BackgroundTasks, # Removed if Celery is used for AI generation
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
-    """Create a new post draft from content item."""
     try:
         content_item_uuid = UUID(draft_data.content_item_id)
     except ValueError:
@@ -99,51 +100,36 @@ async def create_draft(
         )
 
     async with db_session_cm as session:
-        content_repo = ContentItemRepository(session)
-        content_item = await content_repo.get_by_id(content_item_uuid)
+        content_repo = ContentItemRepository(session) # content_repo is an instance of ContentItemRepository
+        
+        # --- MODIFICATION HERE ---
+        # Fetch content_item with its 'source' relationship eagerly loaded
+        stmt = (
+            select(ContentItem)
+            .options(selectinload(ContentItem.source)) # Eager load the 'source' relationship
+            .where(ContentItem.id == content_item_uuid)
+        )
+        result = await session.execute(stmt)
+        content_item = result.scalar_one_or_none()
+        # --- END MODIFICATION ---
 
         if not content_item:
             raise ContentNotFoundError(f"Content item {content_item_uuid} not found")
 
-        if not hasattr(content_item, 'source') or content_item.source.user_id != current_user.id:
-            # Ensure 'source' relationship is loaded or check source_id directly if ContentItem has user_id
-            # This check might need adjustment based on your exact model relationships.
-            # Assuming ContentItem.source is loaded and has user_id
-            source_check = await session.get(ContentSource, content_item.source_id) # Example check
-            if not source_check or source_check.user_id != current_user.id:
-                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
-
+        # Now content_item.source should be loaded, so accessing content_item.source.user_id is safe
+        # The hasattr check is still good practice.
+        if not hasattr(content_item, 'source') or not content_item.source or content_item.source.user_id != current_user.id:
+             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
 
         try:
-            # Assuming ContentGenerator needs the session for its internal repositories
-            content_generator = ContentGenerator(session)
+            content_generator = ContentGenerator(session) # Assuming this is the correct service
             draft = await content_generator.generate_post_from_content(
-                content_item_id=content_item_uuid,
+                content_item_id=content_item_uuid, # or pass content_item object directly
                 user_id=current_user.id,
-                style=draft_data.style if hasattr(draft_data, 'style') else "professional", # Get from draft_data if available
-                num_variations=draft_data.num_variations if hasattr(draft_data, 'num_variations') else 1 # Get from draft_data
+                style=draft_data.style if hasattr(draft_data, 'style') and draft_data.style else "professional_thought_leader",
+                num_variations=draft_data.num_variations if hasattr(draft_data, 'num_variations') else 1
             )
             return PostDraftResponse.model_validate(draft)
-
-        except Exception as service_error:
-            logger.error(f"AI generation failed for content_item {content_item_uuid}: {str(service_error)}", exc_info=True)
-            # Fallback logic from your original code
-            draft_repo = PostDraftRepository(session) # Need repo for fallback
-            fallback_draft = await draft_repo.create( # Assuming create method can take these kwargs
-                user_id=current_user.id,
-                source_content_id=content_item_uuid,
-                content=f"Sharing insights from: {content_item.title}\n\n{content_item.content[:500] if content_item.content else ''}...",
-                hashtags=["#insight", "#sharing"], # Ensure this is List[str] if model expects it
-                title=content_item.title[:255] if content_item.title else "Generated Post",
-                status=DraftStatus.DRAFT,
-                post_type="text", # Added from model
-                generation_metadata={
-                    "fallback_generation": True,
-                    "original_error": str(service_error),
-                    "created_at": datetime.utcnow().isoformat()
-                }
-            )
-            return PostDraftResponse.model_validate(fallback_draft)
 
         except Exception as e:
             logger.error(f"Failed to create draft for content_item {content_item_uuid}: {e}", exc_info=True)
@@ -301,9 +287,9 @@ async def delete_draft(
 
 
 @router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
-async def regenerate_draft_endpoint( # Renamed to avoid conflict
-    draft_id: UUID, # Changed to UUID
-    style: Optional[str] = Query("professional", description="Style for regeneration"),
+async def regenerate_draft_endpoint(
+    draft_id: UUID,
+    style: Optional[str] = Query("professional_thought_leader", description="Style for regeneration (e.g., professional_thought_leader, storytelling, educational, thought_provoking)"), # Updated default and description
     preserve_hashtags: bool = Query(False, description="Preserve existing hashtags"),
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
@@ -320,9 +306,10 @@ async def regenerate_draft_endpoint( # Renamed to avoid conflict
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
         try:
-            content_generator = ContentGenerator(session) # Pass session
+            content_generator = ContentGenerator(session) # Corrected class name
             regenerated_draft = await content_generator.regenerate_post_draft(
                 draft_id=draft_id,
+                user_id=current_user.id, # Pass user_id
                 style=style,
                 preserve_hashtags=preserve_hashtags
             )
@@ -361,20 +348,23 @@ async def get_draft_stats(
 
 
 @router.post("/batch-generate", response_model=List[PostDraftResponse])
-async def batch_generate_drafts_endpoint( # Renamed to avoid conflict
+async def batch_generate_drafts_endpoint(
     max_posts: int = Query(5, ge=1, le=10, description="Maximum posts to generate"),
     min_relevance_score: int = Query(70, ge=0, le=100, description="Minimum relevance score"),
+    # Add style parameter to the endpoint
+    style: Optional[str] = Query("professional_thought_leader", description="Style for batch generation (e.g., professional_thought_leader, storytelling)"),
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> List[PostDraftResponse]:
     """Generate multiple drafts from high-relevance content."""
     async with db_session_cm as session:
         try:
-            content_generator = ContentGenerator(session) # Pass session
+            content_generator = ContentGenerator(session) # Corrected class name
             drafts = await content_generator.batch_generate_posts(
                 user_id=current_user.id,
                 max_posts=max_posts,
-                min_relevance_score=min_relevance_score
+                min_relevance_score=min_relevance_score,
+                style=style # Pass the style
             )
             return [PostDraftResponse.model_validate(draft) for draft in drafts]
         except Exception as e:

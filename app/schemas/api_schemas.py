@@ -208,7 +208,9 @@ class ContentStatsResponse(BaseResponseModel):
 # Draft Management Schemas
 class PostDraftCreate(BaseModel):
     """Schema for creating post drafts."""
-    content_item_id: str = Field(..., description="Source content item ID")  # Accept string
+    content_item_id: str
+    style: Optional[str] = "professional_thought_leader"
+    num_variations: Optional[int] = 1
     
     @validator('content_item_id')
     def validate_content_item_id(cls, v):

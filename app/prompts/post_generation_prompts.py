@@ -49,7 +49,7 @@ LinkedIn Best Practices to Keep in Mind:
 Output Format:
 Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
 {
-  "content": "The complete LinkedIn post text, crafted with the above principles.",
+  "content": "The complete LinkedIn post text, crafted with the above principles.  **IMPORTANT: Do NOT include hashtags within this content string itself.** They should ONLY be in the 'hashtags' array.",
   "hashtags": ["#relevantHashtag1", "#relevantHashtag2", "#relevantHashtag3"],
   "engagement_hooks": ["A compelling question or call to engagement used in the post."],
   "call_to_action": "The primary call to action or discussion prompt from the post, if distinct from engagement_hooks."
@@ -561,7 +561,8 @@ Like-Optimized Strategy:
             "casual": "Personal story → Relatable lesson → Friendly engagement",
             "thought_provoking": "Challenge assumption → Present perspective → Provoke discussion",
             "educational": "Teach concept → Provide examples → Encourage application",
-            "motivational": "Inspire action → Share success → Empower others"
+            "motivational": "Inspire action → Share success → Empower others",
+            "storytelling": "Narrate experience → Highlight lesson → Connect to audience"
         }
     
     def _build_engagement_hooks(self) -> Dict[str, List[str]]:

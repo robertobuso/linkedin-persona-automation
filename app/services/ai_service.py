@@ -287,65 +287,89 @@ class AIService:
             Post generation response with multiple draft variations
         """
         try:
-            logger.info(f"Generating post draft from summary: {len(request.summary)} characters")
+            logger.info(f"Generating post draft. Style: {request.style}, Summary: {len(request.summary)} chars")
 
-            # Generate multiple variations
             variations = []
-            for i in range(request.num_variations or 3):
-                try:
-                    # Build post generation prompt
-                    prompt = self.post_prompts.build_post_prompt(
-                        summary=request.summary,
-                        user_examples=request.user_examples,
-                        tone_profile=request.tone_profile,
-                        style=request.style or "professional"
-                    )
+            # To store the metrics of the call that produced the "best" variation for overall reporting
+            best_variation_metrics: Optional[AIUsageMetrics] = None 
 
+            for i in range(request.num_variations or 1): # Ensure at least 1 variation
+                try:
+                    prompt_to_use: str
+                    if request.custom_prompt_text: # Check if a pre-built prompt is provided
+                        prompt_to_use = request.custom_prompt_text
+                        logger.debug(f"Using custom_prompt_text for variation {i+1}")
+                    else:
+                        # Fallback to building prompt based on style if no override
+                        # This assumes PostGenerationPrompts has methods matching the style names
+                        # or a generic build_post_prompt that uses the style.
+                        # For simplicity, let's assume build_post_prompt handles different styles.
+                        prompt_to_use = self.post_prompts.build_post_prompt(
+                            summary=request.summary,
+                            user_examples=request.user_examples,
+                            tone_profile=request.tone_profile,
+                            style=request.style or "professional_thought_leader"
+                        )
+                        logger.debug(f"Built prompt using style '{request.style}' for variation {i+1}")
+                    
                     messages = [
                         SystemMessage(content=self.post_prompts.get_system_prompt()),
-                        HumanMessage(content=prompt)
+                        HumanMessage(content=prompt_to_use)
                     ]
 
-                    # Invoke LLM with slight temperature variation
-                    temperature = 0.7 + (i * 0.1)  # 0.7, 0.8, 0.9
+                    temperature = 0.7 + (i * 0.1) if (request.num_variations or 1) > 1 else 0.7
                     response_text, metrics = await self._invoke_llm_with_fallback(
                         messages=messages,
-                        max_tokens=500,
+                        max_tokens=500, # Or request.max_tokens if you add it to PostGenerationRequest
                         temperature=temperature
                     )
 
-                    # Parse post response
                     post_data = self._parse_post_response(response_text)
+                    # Store metrics with each variation if needed, or just for the best one later
+                    post_data["metrics"] = metrics # Temporarily store metrics with variation
                     variations.append(post_data)
-
-                    # Small delay between variations
-                    await asyncio.sleep(0.5)
+                    
+                    await asyncio.sleep(0.5) # Small delay
 
                 except Exception as e:
-                    logger.warning(f"Failed to generate variation {i+1}: {str(e)}")
+                    logger.warning(f"Failed to generate post variation {i+1}: {str(e)}")
                     continue
-
+            
             if not variations:
-                raise AIServiceError("Failed to generate any post variations")
+                raise AIServiceError("Failed to generate any post variations after LLM calls.")
 
-            # Select best variation based on criteria
-            best_variation = self._select_best_post_variation(variations, request.tone_profile)
+            best_variation_data = self._select_best_post_variation(variations, request.tone_profile)
+            # Retrieve the metrics associated with the best variation
+            best_variation_metrics = best_variation_data.pop("metrics", None) 
+            # If metrics were not stored per variation, you might need to log the last 'metrics' object
+
+            # Calculate aggregate metrics (if multiple variations were generated and tracked)
+            # For simplicity, using metrics from the best (or last successful) variation.
+            # If you generate multiple variations, you need to decide how to aggregate costs/tokens.
+            # The current self.usage_metrics appends ALL calls, so we can sum the last N.
+            num_successful_variations = len(variations)
+            relevant_metrics = self.usage_metrics[-num_successful_variations:] if num_successful_variations > 0 else []
+            
+            final_metrics = best_variation_metrics or (relevant_metrics[-1] if relevant_metrics else AIUsageMetrics(
+                provider="unknown", model="unknown", tokens_used=0, cost=0.0, response_time=0.0, success=False
+            ))
+
 
             return PostGenerationResponse(
-                content=best_variation["content"],
-                hashtags=best_variation["hashtags"],
-                variations=[var["content"] for var in variations],
-                engagement_hooks=best_variation.get("engagement_hooks", []),
-                call_to_action=best_variation.get("call_to_action"),
-                estimated_reach=self._estimate_post_reach(best_variation),
-                processing_time=sum(m.response_time for m in self.usage_metrics[-len(variations):]),
-                model_used=f"{metrics.provider}:{metrics.model}",
-                tokens_used=sum(m.tokens_used for m in self.usage_metrics[-len(variations):]),
-                cost=sum(m.cost for m in self.usage_metrics[-len(variations):])
+                content=best_variation_data["content"],
+                hashtags=best_variation_data["hashtags"],
+                variations=[var["content"] for var in variations], # Content of all generated variations
+                engagement_hooks=best_variation_data.get("engagement_hooks", []),
+                call_to_action=best_variation_data.get("call_to_action"),
+                estimated_reach=self._estimate_post_reach(best_variation_data),
+                processing_time=sum(m.response_time for m in relevant_metrics),
+                model_used=f"{final_metrics.provider}:{final_metrics.model}",
+                tokens_used=sum(m.tokens_used for m in relevant_metrics),
+                cost=sum(m.cost for m in relevant_metrics)
             )
 
         except Exception as e:
-            logger.error(f"Post generation failed: {str(e)}")
+            logger.error(f"Post generation failed: {str(e)}", exc_info=True)
             raise AIServiceError(f"Post generation failed: {str(e)}")
 
     async def generate_comment_draft(self, request: CommentGenerationRequest) -> CommentGenerationResponse:

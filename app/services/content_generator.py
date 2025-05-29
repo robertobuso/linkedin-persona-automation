@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.ai_service import AIService
+from app.prompts.post_generation_prompts import PostGenerationPrompts
 from app.services.tone_analyzer import ToneAnalyzer
 from app.repositories.content_repository import ContentItemRepository, PostDraftRepository
 from app.repositories.user_repository import UserRepository
@@ -21,6 +22,7 @@ from app.models.user import User
 from app.schemas.ai_schemas import (
     SummaryRequest, PostGenerationRequest, ToneProfile
 )
+from app.schemas.api_schemas import PostDraftCreate
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +53,27 @@ class ContentGenerator:
         self.content_repo = ContentItemRepository(session)
         self.post_repo = PostDraftRepository(session)
         self.user_repo = UserRepository(session)
+        self.post_prompts = PostGenerationPrompts()
     
+    async def _get_user_and_tone_profile(self, user_id: UUID) -> tuple[User, ToneProfile]:
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found for draft generation.")
+        
+        # Assuming user.tone_profile is a JSONB field that matches ToneProfile structure
+        # You might need to deserialize it properly if it's just a dict from DB
+        # For now, assuming it can be passed to Pydantic's ToneProfile.model_validate
+        tone_profile_data = user.tone_profile or {} # Get from user model
+        tone_profile = ToneProfile(**tone_profile_data) # Validate/Create Pydantic model
+        return user, tone_profile
+
     async def generate_post_from_content(
         self,
         content_item_id: UUID,
         user_id: UUID,
-        style: Optional[str] = None,
-        num_variations: int = 3
+        style: str = "professional_thought_leader",
+        num_variations: int = 3,
+        target_platform: str = "linkedin"
     ) -> PostDraft:
         """
         Generate LinkedIn post draft from content item.
@@ -75,67 +91,77 @@ class ContentGenerator:
             ContentGenerationError: If generation fails
         """
         try:
-            logger.info(f"Generating post from content {content_item_id} for user {user_id}")
-            
-            # Get content item and user
+            logger.info(f"Generating post from content {content_item_id} for user {user_id} with style '{style}'")
             content_item = await self.content_repo.get_by_id(content_item_id)
             if not content_item:
-                raise ContentGenerationError(f"Content item {content_item_id} not found")
-            
-            user = await self.user_repo.get_by_id(user_id)
-            if not user:
-                raise ContentGenerationError(f"User {user_id} not found")
-            
-            # Extract user tone profile
-            tone_profile = self._extract_tone_profile(user)
-            
-            # Step 1: Summarize content
-            summary_response = await self._summarize_content(content_item, tone_profile)
-            
-            # Step 2: Get user's historical posts for examples
-            user_examples = await self._get_user_post_examples(user_id)
-            
-            # Step 3: Generate post variations
-            post_response = await self._generate_post_variations(
-                summary_response.summary,
-                tone_profile,
-                user_examples,
-                style,
-                num_variations
+                raise ValueError(f"Content item {content_item_id} not found.")
+
+            user, tone_profile = await self._get_user_and_tone_profile(user_id)
+
+            # For now, user_examples might be empty or fetched from user's past posts
+            user_post_examples: List[str] = [] # TODO: Implement fetching user examples if desired
+
+            summary_text = content_item.ai_analysis.get("summary") if content_item.ai_analysis else content_item.content[:1000]
+            if not summary_text:
+                summary_text = content_item.title # Fallback summary
+
+            # Build the specific prompt based on style
+            prompt_text: str
+            if style == "storytelling":
+                prompt_text = self.post_prompts.build_storytelling_post_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "thought_leadership":
+                prompt_text = self.post_prompts.build_thought_leadership_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "educational":
+                prompt_text = self.post_prompts.build_educational_post_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "engagement_optimized":
+                prompt_text = self.post_prompts.build_engagement_optimized_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            else: # Default or "professional_thought_leader"
+                prompt_text = self.post_prompts.build_post_prompt(
+                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=style
+                )
+
+            generation_request = PostGenerationRequest(
+                summary=summary_text, # Summary still useful for AIService context if needed
+                tone_profile=tone_profile,
+                user_examples=user_post_examples,
+                style=style, # Style can still be passed for AIService logging/metrics
+                num_variations=num_variations,
+                custom_prompt_text=prompt_text # Pass the fully constructed prompt
             )
-            
-            # Step 4: Validate and create draft
-            validated_content = await self._validate_post_content(
-                post_response.content,
-                post_response.hashtags
-            )
-            
-            # Create post draft
-            post_draft = await self.post_repo.create(
+
+            post_draft_response_data = await self.ai_service.generate_post_draft(generation_request)
+
+            new_draft = await self.post_repo.create(
                 user_id=user_id,
                 source_content_id=content_item_id,
-                content=validated_content["content"],
-                hashtags=validated_content["hashtags"],
-                title=content_item.title[:255] if content_item.title else None,
-                status=DraftStatus.READY,
-                generation_prompt=f"Generated from: {content_item.title}",
-                ai_model_used=post_response.model_used,
+                title=content_item.title[:250] if content_item.title else "AI Generated Post",
+                content=post_draft_response_data.content,
+                hashtags=post_draft_response_data.hashtags,
+                status=DraftStatus.READY, # Or DRAFT, depending on your flow
+                post_type="text", # Or determine from content/style
+                generation_prompt=prompt_text, # Store the actual prompt used
+                ai_model_used=post_draft_response_data.model_used,
                 generation_metadata={
-                    "summary": summary_response.summary,
-                    "key_points": summary_response.key_points,
-                    "variations_generated": len(post_response.variations),
-                    "style": style or "professional",
-                    "tone_profile_used": tone_profile.dict(),
-                    "processing_time": post_response.processing_time,
-                    "tokens_used": post_response.tokens_used,
-                    "cost": post_response.cost,
-                    "estimated_reach": post_response.estimated_reach,
+                    "style_used": style,
+                    "num_variations_generated": len(post_draft_response_data.variations),
+                    "summary_length": len(summary_text),
+                    "cost": post_draft_response_data.cost,
+                    "tokens_used": post_draft_response_data.tokens_used,
+                    "processing_time_seconds": post_draft_response_data.processing_time,
+                    "estimated_reach": post_draft_response_data.estimated_reach,
                     "generated_at": datetime.utcnow().isoformat()
                 }
             )
-            
-            logger.info(f"Successfully generated post draft {post_draft.id}")
-            return post_draft
+            logger.info(f"Successfully generated post draft {new_draft.id} with style '{style}'")
+            return new_draft
             
         except Exception as e:
             logger.error(f"Post generation failed: {str(e)}")
@@ -145,7 +171,8 @@ class ContentGenerator:
         self,
         user_id: UUID,
         max_posts: int = 5,
-        min_relevance_score: int = 70
+        min_relevance_score: int = 70,
+        style: str = "professional_thought_leader" 
     ) -> List[PostDraft]:
         """
         Generate multiple posts from high-relevance content items.
@@ -159,62 +186,47 @@ class ContentGenerator:
             List of created PostDraft instances
         """
         try:
-            logger.info(f"Batch generating up to {max_posts} posts for user {user_id}")
-            
-            # Get high-relevance content items
-            content_items = await self.content_repo.get_high_relevance_items(
-                user_id=user_id,
-                min_score=min_relevance_score,
-                limit=max_posts * 2  # Get more items to have options
+            logger.info(f"Batch generating up to {max_posts} posts for user {user_id} with style '{style}' and min score {min_relevance_score}")
+        
+            # 1. Get high-relevance processed content items for the user
+            #    (adjust limit to get a few more than max_posts to account for potential existing drafts)
+            candidate_items = await self.content_repo.get_high_relevance_items(
+                user_id=user_id, 
+                min_score=min_relevance_score, 
+                limit=max_posts * 2 # Fetch more to filter
             )
-            
-            if not content_items:
-                logger.warning(f"No high-relevance content found for user {user_id}")
+
+            if not candidate_items:
+                logger.info(f"No suitable content items found for user {user_id} for batch generation.")
                 return []
-            
-            # Check for existing drafts to avoid duplicates
-            existing_drafts = await self.post_repo.get_drafts_by_status(
-                user_id=user_id,
-                status=DraftStatus.READY,
-                limit=50
-            )
-            
-            existing_content_ids = {
-                draft.source_content_id for draft in existing_drafts 
-                if draft.source_content_id
-            }
-            
-            # Filter out content that already has drafts
-            available_content = [
-                item for item in content_items 
-                if item.id not in existing_content_ids
-            ]
-            
-            if not available_content:
-                logger.warning(f"No new content available for post generation for user {user_id}")
-                return []
-            
-            # Generate posts
-            generated_drafts = []
-            for i, content_item in enumerate(available_content[:max_posts]):
+
+            # 2. Get IDs of content items already drafted (e.g., in 'draft' or 'ready' status)
+            #    to avoid re-drafting them immediately.
+            #    This might need a more sophisticated check or a new repo method.
+            #    For simplicity, let's assume we fetch recent drafts.
+            recent_drafts = await self.post_repo.get_drafts_by_status(user_id, DraftStatus.READY, limit=50)
+            recent_drafts += await self.post_repo.get_drafts_by_status(user_id, DraftStatus.DRAFT, limit=50)
+            drafted_content_ids = {draft.source_content_id for draft in recent_drafts if draft.source_content_id}
+
+            generated_drafts: List[PostDraft] = []
+            items_to_draft_from = [item for item in candidate_items if item.id not in drafted_content_ids]
+
+            for content_item in items_to_draft_from:
+                if len(generated_drafts) >= max_posts:
+                    break
                 try:
                     draft = await self.generate_post_from_content(
                         content_item_id=content_item.id,
                         user_id=user_id,
-                        style="professional",
-                        num_variations=2  # Fewer variations for batch processing
+                        style=style, # Use the passed style
+                        num_variations=1 
                     )
                     generated_drafts.append(draft)
-                    
-                    # Small delay between generations to avoid rate limiting
-                    if i < len(available_content) - 1:
-                        await asyncio.sleep(2)
-                        
                 except Exception as e:
-                    logger.error(f"Failed to generate post from content {content_item.id}: {str(e)}")
+                    logger.error(f"Failed to generate draft for content_item {content_item.id} in batch: {e}", exc_info=True)
                     continue
             
-            logger.info(f"Batch generation completed: {len(generated_drafts)} posts created")
+            logger.info(f"Batch generation completed: {len(generated_drafts)} posts created for user {user_id}")
             return generated_drafts
             
         except Exception as e:
@@ -224,6 +236,7 @@ class ContentGenerator:
     async def regenerate_post_draft(
         self,
         draft_id: UUID,
+        user_id: UUID,
         style: Optional[str] = None,
         preserve_hashtags: bool = False
     ) -> PostDraft:
@@ -239,73 +252,68 @@ class ContentGenerator:
             Updated PostDraft instance
         """
         try:
-            logger.info(f"Regenerating post draft {draft_id}")
+            logger.info(f"Regenerating draft {draft_id} with style '{style}' for user {user_id}")
+            original_draft = await self.post_repo.get_by_id(draft_id)
+            if not original_draft or original_draft.user_id != user_id:
+                raise ValueError("Draft not found or access denied.")
+            if not original_draft.source_content_id:
+                raise ValueError("Original content source not found for this draft, cannot regenerate.")
+
+            content_item = await self.content_repo.get_by_id(original_draft.source_content_id)
+            if not content_item:
+                raise ValueError(f"Source content item {original_draft.source_content_id} not found.")
+
+            # Generate new post content using the specified style
+            # For regeneration, we create a new draft object rather than updating in place,
+            # or you could update if that's the desired behavior.
+            # Here, let's assume it creates a *new variation* or overwrites content.
             
-            # Get existing draft
-            draft = await self.post_repo.get_by_id(draft_id)
-            if not draft:
-                raise ContentGenerationError(f"Draft {draft_id} not found")
-            
-            # Get source content if available
-            if draft.source_content_id:
-                content_item = await self.content_repo.get_by_id(draft.source_content_id)
-                if content_item:
-                    # Regenerate from source content
-                    new_draft = await self.generate_post_from_content(
-                        content_item_id=content_item.id,
-                        user_id=draft.user_id,
-                        style=style,
-                        num_variations=2
-                    )
-                    
-                    # Update existing draft with new content
-                    update_data = {
-                        "content": new_draft.content,
-                        "generation_metadata": new_draft.generation_metadata
-                    }
-                    
-                    if not preserve_hashtags:
-                        update_data["hashtags"] = new_draft.hashtags
-                    
-                    updated_draft = await self.post_repo.update(draft_id, **update_data)
-                    
-                    # Clean up temporary draft
-                    await self.post_repo.delete(new_draft.id)
-                    
-                    return updated_draft
-            
-            # If no source content, regenerate from existing content
-            user = await self.user_repo.get_by_id(draft.user_id)
-            tone_profile = self._extract_tone_profile(user)
-            user_examples = await self._get_user_post_examples(draft.user_id)
-            
-            # Use existing content as summary
-            post_response = await self._generate_post_variations(
-                summary=draft.content[:500],  # Use first 500 chars as summary
+            user, tone_profile = await self._get_user_and_tone_profile(user_id)
+            user_post_examples: List[str] = [] # TODO: Fetch if needed
+
+            summary_text = content_item.ai_analysis.get("summary") if content_item.ai_analysis else content_item.content[:1000]
+            if not summary_text:
+                summary_text = content_item.title
+
+            prompt_text: str
+            if style == "storytelling":
+                prompt_text = self.post_prompts.build_storytelling_post_prompt(summary_text, tone_profile, user_post_examples)
+            # Add other elif style == "..." blocks here for other prompt builders
+            else: # Default
+                prompt_text = self.post_prompts.build_post_prompt(summary_text, user_post_examples, tone_profile, style)
+
+            generation_request = PostGenerationRequest(
+                summary=summary_text,
                 tone_profile=tone_profile,
-                user_examples=user_examples,
-                style=style or "professional",
-                num_variations=2
+                user_examples=user_post_examples,
+                style=style,
+                num_variations=1, # Regenerate one primary version
+                custom_prompt_text=prompt_text
             )
             
-            # Update draft
-            update_data = {
-                "content": post_response.content,
+            post_draft_response_data = await self.ai_service.generate_post_draft(generation_request)
+
+            update_data: Dict[str, Any] = {
+                "content": post_draft_response_data.content,
+                "generation_prompt": prompt_text, # Store the new prompt
+                "ai_model_used": post_draft_response_data.model_used,
                 "generation_metadata": {
-                    **draft.generation_metadata,
-                    "regenerated_at": datetime.utcnow().isoformat(),
-                    "regeneration_style": style,
-                    "regeneration_tokens": post_response.tokens_used,
-                    "regeneration_cost": post_response.cost
+                    **(original_draft.generation_metadata or {}), # Preserve old metadata if any
+                    "regenerated_with_style": style,
+                    "summary_length": len(summary_text),
+                    "cost": post_draft_response_data.cost,
+                    "tokens_used": post_draft_response_data.tokens_used,
+                    "processing_time_seconds": post_draft_response_data.processing_time,
+                    "regenerated_at": datetime.utcnow().isoformat()
                 }
             }
-            
             if not preserve_hashtags:
-                update_data["hashtags"] = post_response.hashtags
-            
+                update_data["hashtags"] = post_draft_response_data.hashtags
+
             updated_draft = await self.post_repo.update(draft_id, **update_data)
-            
-            logger.info(f"Successfully regenerated draft {draft_id}")
+            if not updated_draft:
+                raise ValueError(f"Failed to update draft {draft_id} during regeneration.")
+            logger.info(f"Successfully regenerated draft {draft_id} with style '{style}'")
             return updated_draft
             
         except Exception as e:

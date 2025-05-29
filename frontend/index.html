@@ -389,6 +389,32 @@
                 padding: 1rem;
             }
         }
+
+        .style-dropdown-menu {
+            position: absolute; 
+            bottom: calc(100% + 5px); /* Position above the button with a small gap */
+            left: 0;
+            background: white; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            z-index: 10;
+            min-width: 200px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 0.5rem 0;
+        }
+
+        .style-dropdown-item {
+            padding: 0.75rem 1rem; 
+            cursor: pointer;
+            white-space: nowrap;
+            display: flex; /* For spinner alignment */
+            align-items: center;
+        }
+
+        .style-dropdown-item:hover {
+            background: #f0f5fa;
+            color: #005885;
+        }
     </style>
 </head>
 <body>
@@ -1441,68 +1467,88 @@
             const [drafts, setDrafts] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState('');
+            const { apiCall, addToast } = useApi(); // Assuming addToast is available via useApi
+            const [isBatchLoading, setIsBatchLoading] = useState(false);
 
             useEffect(() => {
                 loadDrafts();
             }, []);
 
             const loadDrafts = async () => {
+                setLoading(true); // Ensure loading is set when reloading
                 try {
                     const data = await apiCall('/drafts');
                     setDrafts(data);
                 } catch (err) {
                     setError(err.message);
+                    addToast(err.message, 'error');
                 } finally {
                     setLoading(false);
                 }
             };
 
-            const handleBatchGenerate = async () => {
+            const handleBatchGenerate = async () => { // Removed style from param, get it from select
+                const selectedStyle = document.getElementById('batchStyleSelect').value;
+                if (!selectedStyle) {
+                    addToast("Please select a generation style.", "warning");
+                    return;
+                }
+                setIsBatchLoading(true); // Assuming you add a new state: const [isBatchLoading, setIsBatchLoading] = useState(false);
                 try {
-                    setLoading(true);
-                    const data = await apiCall('/drafts/batch-generate', {
+                    const data = await apiCall(`/drafts/batch-generate?style=${encodeURIComponent(selectedStyle)}&max_posts=5`, { 
                         method: 'POST',
                     });
-                    setDrafts([...drafts, ...data]);
-                    alert(`Generated ${data.length} new drafts!`);
+                    setDrafts(prevDrafts => [...data, ...prevDrafts]); 
+                    addToast(`Successfully generated ${data.length} new drafts with style: ${selectedStyle}!`, 'success');
                 } catch (err) {
-                    alert('Failed to generate drafts: ' + err.message);
+                    addToast('Failed to batch generate drafts: ' + err.message, 'error');
                 } finally {
-                    setLoading(false);
+                    setIsBatchLoading(false);
                 }
             };
+            
+            // Function to handle draft updates (e.g., after regeneration)
+            const handleDraftUpdated = (updatedDraft) => {
+                setDrafts(prevDrafts => prevDrafts.map(d => d.id === updatedDraft.id ? updatedDraft : d));
+            };
 
-            if (loading) {
+
+            if (loading && drafts.length === 0) { // Only show full loading if no drafts are displayed yet
                 return <div className="loading">Loading drafts...</div>;
             }
 
             return (
                 <div>
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
                         <h2>Post Drafts</h2>
-                        <button 
-                            className="btn btn-primary"
-                            onClick={handleBatchGenerate}
-                            disabled={loading}
-                        >
-                            🎯 Generate Drafts
-                        </button>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                             <label htmlFor="batchStyleSelect" style={{marginRight: '0.5rem', fontWeight: 500}}>Style:</label>
+                             <select id="batchStyleSelect" className="form-control" style={{width: 'auto', minWidth: '180px', display: 'inline-block', marginTop:0}}>
+                                <option value="professional_thought_leader">Thought Leader</option>
+                                <option value="storytelling">Storytelling</option>
+                                <option value="educational">Educational</option>
+                                <option value="thought_provoking">Thought Provoking (Deep)</option>
+                                <option value="engagement_optimized">Engagement Optimized</option>
+                                <option value="casual">Casual</option>
+                            </select>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={handleBatchGenerate} // No need to pass style here
+                                disabled={isBatchLoading || loading} // Use isBatchLoading
+                            >
+                                {isBatchLoading ? <span className="loading-spinner" /> : '🎯'} Generate Batch
+                            </button>
+                        </div>
                     </div>
 
                     {error && (
                         <div className="alert alert-error">{error}</div>
                     )}
 
-                    {drafts.length === 0 ? (
+                    {drafts.length === 0 && !loading ? (
                         <div className="empty-state">
                             <h3>No drafts yet</h3>
                             <p>Generate drafts from your content feed or use batch generation!</p>
-                            <button 
-                                className="btn btn-primary"
-                                onClick={handleBatchGenerate}
-                            >
-                                Generate Your First Drafts
-                            </button>
                         </div>
                     ) : (
                         <div>
@@ -1510,7 +1556,7 @@
                                 <DraftCard 
                                     key={draft.id} 
                                     draft={draft} 
-                                    onUpdate={loadDrafts}
+                                    onUpdate={handleDraftUpdated} // Pass update handler
                                 />
                             ))}
                         </div>
@@ -1523,54 +1569,83 @@
         const DraftCard = ({ draft, onUpdate }) => {
             const [editing, setEditing] = useState(false);
             const [content, setContent] = useState(draft.content);
-            const [loading, setLoading] = useState(false);
+            const [isRegenerating, setIsRegenerating] = useState(false); // For individual regeneration
+            const [showStyleOptions, setShowStyleOptions] = useState(false);
+            const { apiCall, addToast } = useApi();
+            const [activeRegenerationStyle, setActiveRegenerationStyle] = useState(null);
+
+            const availableStyles = [
+                {value: "professional_thought_leader", label: "Thought Leader"},
+                {value: "storytelling", label: "Storytelling"},
+                {value: "educational", label: "Educational (Tips)"},
+                {value: "thought_provoking", label: "Thought Provoking (Deep)"},
+                {value: "engagement_optimized", label: "Engagement Optimized"},
+                {value: "casual", label: "Casual"},
+            ];
 
             const handleSave = async () => {
+                setIsRegenerating(true); // Use a general loading state
                 try {
-                    setLoading(true);
-                    await apiCall(`/drafts/${draft.id}`, {
+                    const updatedDraft = await apiCall(`/drafts/${draft.id}`, {
                         method: 'PUT',
-                        body: JSON.stringify({
-                            content: content
-                        }),
+                        body: JSON.stringify({ content: content /*, hashtags: newHashtags (if editable) */ }),
                     });
                     setEditing(false);
-                    onUpdate();
+                    onUpdate(updatedDraft); // Update the specific draft in the parent
+                    addToast('Draft saved successfully!', 'success');
                 } catch (err) {
-                    alert('Failed to save draft: ' + err.message);
+                    addToast('Failed to save draft: ' + err.message, 'error');
                 } finally {
-                    setLoading(false);
+                    setIsRegenerating(false);
                 }
             };
 
             const handlePublish = async () => {
+                setIsRegenerating(true);
                 try {
-                    setLoading(true);
                     await apiCall(`/drafts/${draft.id}/publish`, {
                         method: 'POST',
-                        body: JSON.stringify({}),
+                        body: JSON.stringify({}), // Empty body for now
                     });
-                    alert('Draft published successfully!');
-                    onUpdate();
+                    addToast('Draft published successfully! (Mocked)', 'success');
+                    onUpdate({...draft, status: 'published', linkedin_post_url: `mock_url/${draft.id}`}); // Optimistic update
                 } catch (err) {
-                    alert('Failed to publish draft: ' + err.message);
+                    addToast('Failed to publish draft: ' + err.message, 'error');
                 } finally {
-                    setLoading(false);
+                    setIsRegenerating(false);
                 }
             };
 
-            const handleRegenerate = async () => {
+            const handleRegenerate = async (style) => {
+                setShowStyleOptions(false); // Close dropdown
+                setActiveRegenerationStyle(style); // Set which style is being regenerated
+                // setIsRegenerating(true); // General loading state for the card can still be useful
                 try {
-                    setLoading(true);
-                    const data = await apiCall(`/drafts/${draft.id}/regenerate`, {
+                    const regeneratedData = await apiCall(`/drafts/${draft.id}/regenerate?style=${encodeURIComponent(style)}`, {
                         method: 'POST',
                     });
-                    setContent(data.content);
-                    onUpdate();
+                    setContent(regeneratedData.content);
+                    onUpdate(regeneratedData);
+                    addToast(`Draft regenerated with style: ${style}!`, 'success');
                 } catch (err) {
-                    alert('Failed to regenerate draft: ' + err.message);
+                    addToast('Failed to regenerate draft: ' + err.message, 'error');
                 } finally {
-                    setLoading(false);
+                    setActiveRegenerationStyle(null); // Clear specific style loading
+                    // setIsRegenerating(false);
+                }
+            };
+
+            const handleDelete = async () => {
+                if (!confirm("Are you sure you want to delete this draft?")) return;
+                setIsRegenerating(true);
+                try {
+                    await apiCall(`/drafts/${draft.id}`, { method: 'DELETE' });
+                    addToast('Draft deleted successfully.', 'success');
+                    onUpdate({ ...draft, _deleted: true }); // Signal to parent to filter this out
+                } catch (err) {
+                    addToast('Failed to delete draft: ' + err.message, 'error');
+                } finally {
+                    setIsRegenerating(false);
                 }
             };
 
@@ -1596,9 +1671,10 @@
                                 color: 'white'
                             }}
                         >
-                            {draft.status.toUpperCase()}
+                            {draft.status ? draft.status.toUpperCase() : 'UNKNOWN'}
                         </span>
                     </div>
+
 
                     {editing ? (
                         <div>
@@ -1606,75 +1682,73 @@
                                 value={content}
                                 onChange={(e) => setContent(e.target.value)}
                                 className="form-control"
-                                rows="6"
+                                rows="8"
                                 style={{marginBottom: '1rem'}}
                             />
+                            {/* Consider adding hashtag editing here */}
                             <div style={{display: 'flex', gap: '0.5rem'}}>
-                                <button 
-                                    className="btn btn-primary"
-                                    onClick={handleSave}
-                                    disabled={loading}
-                                >
-                                    💾 Save
+                                <button className="btn btn-primary" onClick={handleSave} disabled={isRegenerating}>
+                                    {isRegenerating ? <span className="loading-spinner" /> : '💾 Save'}
                                 </button>
-                                <button 
-                                    className="btn btn-secondary"
-                                    onClick={() => {
-                                        setEditing(false);
-                                        setContent(draft.content);
-                                    }}
-                                >
+                                <button className="btn btn-secondary" onClick={() => { setEditing(false); setContent(draft.content); }}>
                                     ❌ Cancel
                                 </button>
                             </div>
                         </div>
                     ) : (
                         <div>
-                            <p style={{whiteSpace: 'pre-wrap', marginBottom: '1rem'}}>
-                                {draft.content}
-                            </p>
-                            
+                            <p style={{whiteSpace: 'pre-wrap', marginBottom: '1rem'}}>{draft.content}</p>
                             {draft.hashtags && draft.hashtags.length > 0 && (
                                 <div style={{marginBottom: '1rem'}}>
-                                    {draft.hashtags.map(tag => (
-                                        <span key={tag} className="tag">{tag}</span>
-                                    ))}
+                                    {draft.hashtags.map(tag => <span key={tag} className="tag">{tag}</span>)}
                                 </div>
                             )}
-
-                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                                <div>
-                                    <small>
-                                        Created: {new Date(draft.created_at).toLocaleDateString()}
-                                        {draft.published_at && (
-                                            <> • Published: {new Date(draft.published_at).toLocaleDateString()}</>
-                                        )}
-                                    </small>
-                                </div>
-                                <div style={{display: 'flex', gap: '0.5rem'}}>
+                           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem'}}>
+                                <div> {/* Date info */} </div>
+                                <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center'}}>
                                     <button 
-                                        className="btn btn-secondary"
-                                        onClick={() => setEditing(true)}
-                                        disabled={loading || draft.status === 'published'}
-                                    >
+                                        className="btn btn-secondary" 
+                                        onClick={() => setEditing(true)} 
+                                        disabled={isRegenerating || activeRegenerationStyle || draft.status === 'published'}>
                                         ✏️ Edit
                                     </button>
-                                    <button 
-                                        className="btn btn-secondary"
-                                        onClick={handleRegenerate}
-                                        disabled={loading || draft.status === 'published'}
-                                    >
-                                        🔄 Regenerate
-                                    </button>
+                                    
+                                    <div style={{ position: 'relative' }}>
+                                        <button 
+                                            className="btn btn-secondary"
+                                            onClick={() => setShowStyleOptions(prev => !prev)}
+                                            disabled={isRegenerating || activeRegenerationStyle || draft.status === 'published'}
+                                        >
+                                            🔄 Regenerate
+                                        </button>
+                                        {showStyleOptions && (
+                                            <div className="style-dropdown-menu">
+                                                {availableStyles.map(styleOpt => (
+                                                    <div 
+                                                        key={styleOpt.value}
+                                                        className="style-dropdown-item"
+                                                        onClick={() => handleRegenerate(styleOpt.value)}
+                                                    >
+                                                        {activeRegenerationStyle === styleOpt.value ? 
+                                                            <span className="loading-spinner" style={{width:'1em', height:'1em', borderWidth:'2px', marginRight: '5px'}} /> : null}
+                                                        {styleOpt.label}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
                                     {draft.status !== 'published' && (
                                         <button 
-                                            className="btn btn-primary"
-                                            onClick={handlePublish}
-                                            disabled={loading}
-                                        >
-                                            🚀 Publish
+                                            className="btn btn-primary" 
+                                            onClick={handlePublish} 
+                                            disabled={isRegenerating || activeRegenerationStyle}>
+                                            {isRegenerating && !activeRegenerationStyle ? <span className="loading-spinner" /> : '🚀 Publish'}
                                         </button>
                                     )}
+                                    <button className="btn btn-danger" style={{background: '#dc3545', color: 'white'}} onClick={handleDelete} disabled={isRegenerating}>
+                                        🗑️ Delete
+                                    </button>
                                     {draft.linkedin_post_url && (
                                         <a 
                                             href={draft.linkedin_post_url}

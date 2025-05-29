@@ -34,6 +34,8 @@ class PostStyleEnum(str, Enum):
     THOUGHT_PROVOKING = "thought_provoking"
     EDUCATIONAL = "educational"
     MOTIVATIONAL = "motivational"
+    STORYTELLING = "storytelling"
+    PROFESSIONAL_THOUGHT_LEADER = "professional_thought_leader"
 
 
 class EngagementTypeEnum(str, Enum):
@@ -118,11 +120,12 @@ class PostGenerationRequest(BaseModel):
     """Schema for LinkedIn post generation requests."""
     summary: str = Field(..., min_length=50, description="Content summary to generate post from")
     tone_profile: ToneProfile = Field(..., description="User tone profile")
-    user_examples: Optional[List[str]] = Field(None, description="User's historical posts for style matching")
-    style: Optional[PostStyleEnum] = Field(PostStyleEnum.PROFESSIONAL, description="Desired post style")
+    user_examples: Optional[List[str]] = Field("professional_thought_leader", description="User's historical posts for style matching")
+    style: Optional[PostStyleEnum] = Field(PostStyleEnum.PROFESSIONAL_THOUGHT_LEADER, description="Desired post style")
     num_variations: Optional[int] = Field(3, ge=1, le=5, description="Number of variations to generate")
     include_hashtags: Optional[bool] = Field(True, description="Whether to include hashtags")
     max_length: Optional[int] = Field(3000, ge=100, le=3000, description="Maximum post length")
+    custom_prompt_text: Optional[str] = None
     
     @validator('user_examples')
     def validate_user_examples(cls, v):
