@@ -43,11 +43,11 @@ class RSSParser:
     
     def __init__(self):
         """Initialize RSS parser with session configuration."""
-        self.session = self._create_session()
         self.user_agent = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         )
+        self.session = self._create_session()
     
     def _create_session(self) -> requests.Session:
         """
