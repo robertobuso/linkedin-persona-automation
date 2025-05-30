@@ -146,7 +146,7 @@
         .main-content {
             flex: 1;
             padding: 2rem;
-            max-width: 1200px;
+            max-width: 1800px;
             margin: 0 auto;
             width: 100%;
         }
@@ -951,20 +951,41 @@
                     <aside className="sidebar">
                         <h3>Navigation</h3>
                         <ul className="nav-menu">
+                            {/* Existing tabs */}
                             <li><a href="#" className={activeTab === 'overview' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}>📊 Overview</a></li>
                             <li><a href="#" className={activeTab === 'sources' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}>📡 Content Sources</a></li>
                             <li><a href="#" className={activeTab === 'feed' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}>📰 Content Feed</a></li>
                             <li><a href="#" className={activeTab === 'drafts' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}>✏️ Post Drafts</a></li>
-                            <li><a href="#" className={activeTab === 'preferences' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('preferences'); }}>⚙️ Preferences</a></li>
+                            
+                            {/* NEW: Comment Management Section */}
+                            <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
+                                <span style={{fontSize: '0.9rem', fontWeight: 'bold', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px'}}>
+                                    Comment Management
+                                </span>
+                            </li>
+                            <li><a href="#" className={activeTab === 'comment-discovery' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-discovery'); }}>🔍 Comment Discovery</a></li>
+                            <li><a href="#" className={activeTab === 'comment-queue' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-queue'); }}>📝 Comment Queue</a></li>
+                            <li><a href="#" className={activeTab === 'comment-analytics' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-analytics'); }}>📈 Comment Analytics</a></li>
+                            
+                            {/* Existing preferences tab */}
+                            <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
+                                <a href="#" className={activeTab === 'preferences' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('preferences'); }}>⚙️ Settings</a>
+                            </li>
                         </ul>
                     </aside>
 
                     <div className="content-area">
+                        {/* Existing tabs */}
                         {activeTab === 'overview' && <OverviewTab />}
                         {activeTab === 'sources' && <SourcesTab />}
                         {activeTab === 'feed' && <FeedTab />}
                         {activeTab === 'drafts' && <DraftsTab />}
                         {activeTab === 'preferences' && <PreferencesTab />}
+                        
+                        {/* NEW: Comment Management tabs */}
+                        {activeTab === 'comment-discovery' && <CommentDiscoveryTab />}
+                        {activeTab === 'comment-queue' && <CommentQueueTab />}
+                        {activeTab === 'comment-analytics' && <CommentAnalyticsTab />}
                     </div>
                 </div>
             );
@@ -973,21 +994,23 @@
         // Overview Tab - FIXED with real API calls
         const OverviewTab = () => {
             const [stats, setStats] = useState(null);
+            const [commentStats, setCommentStats] = useState(null);
             const [loading, setLoading] = useState(true);
             const { apiCall } = useApi();
 
             useEffect(() => {
-                loadStats();
+                loadAllStats();
             }, []);
 
-            const loadStats = async () => {
+            const loadAllStats = async () => {
                 setLoading(true);
                 try {
-                    // Load content stats
+                    // Load existing content stats
                     const contentStats = await apiCall('/content/stats');
-                    
-                    // Load draft stats
                     const draftStats = await apiCall('/drafts/stats/summary');
+                    
+                    // Load new comment stats
+                    const commentAnalytics = await apiCall('/engagement/comment-analytics?days=30');
                     
                     setStats({
                         sources: contentStats.total_sources || 0,
@@ -996,15 +1019,29 @@
                         drafts: draftStats.total_drafts || 0,
                         published: draftStats.published || 0
                     });
+
+                    setCommentStats({
+                        opportunities: commentAnalytics.total_comment_opportunities || 0,
+                        comments_posted: commentAnalytics.comments_posted || 0,
+                        success_rate: commentAnalytics.success_rate || 0,
+                        pending: commentAnalytics.comments_pending || 0
+                    });
+                    
                 } catch (err) {
                     console.error('Failed to load stats:', err);
-                    // Fallback to zeros on error
+                    // Fallback stats
                     setStats({
                         sources: 0,
                         active_sources: 0,
                         content_items: 0,
                         drafts: 0,
                         published: 0
+                    });
+                    setCommentStats({
+                        opportunities: 0,
+                        comments_posted: 0,
+                        success_rate: 0,
+                        pending: 0
                     });
                 } finally {
                     setLoading(false);
@@ -1021,46 +1058,327 @@
                         <h2>Dashboard Overview</h2>
                         <button 
                             className="btn btn-secondary"
-                            onClick={loadStats}
+                            onClick={loadAllStats}
                             disabled={loading}
                         >
                             {loading ? '🔄 Loading...' : '🔄 Refresh'}
                         </button>
                     </div>
                     
-                    <div className="stats">
-                        <div className="stat-card">
-                            <div className="stat-number">{stats.sources}</div>
-                            <div>Total Sources</div>
-                        </div>
-                        <div className="stat-card">
-                            <div className="stat-number">{stats.active_sources}</div>
-                            <div>Active Sources</div>
-                        </div>
-                        <div className="stat-card">
-                            <div className="stat-number">{stats.content_items}</div>
-                            <div>Content Items</div>
-                        </div>
-                        <div className="stat-card">
-                            <div className="stat-number">{stats.drafts}</div>
-                            <div>Draft Posts</div>
-                        </div>
-                        <div className="stat-card">
-                            <div className="stat-number">{stats.published}</div>
-                            <div>Published Posts</div>
+                    {/* Content Statistics */}
+                    <div style={{marginBottom: '2rem'}}>
+                        <h3 style={{marginBottom: '1rem', color: '#0077b5'}}>Content Pipeline</h3>
+                        <div className="stats">
+                            <div className="stat-card">
+                                <div className="stat-number">{stats.sources}</div>
+                                <div>Total Sources</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{stats.active_sources}</div>
+                                <div>Active Sources</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{stats.content_items}</div>
+                                <div>Content Items</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{stats.drafts}</div>
+                                <div>Draft Posts</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{stats.published}</div>
+                                <div>Published Posts</div>
+                            </div>
                         </div>
                     </div>
 
+                    {/* NEW: Comment Statistics */}
+                    <div style={{marginBottom: '2rem'}}>
+                        <h3 style={{marginBottom: '1rem', color: '#0077b5'}}>Comment Automation</h3>
+                        <div className="stats">
+                            <div className="stat-card">
+                                <div className="stat-number">{commentStats.opportunities}</div>
+                                <div>Opportunities Found</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{commentStats.comments_posted}</div>
+                                <div>Comments Posted</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{commentStats.success_rate.toFixed(0)}%</div>
+                                <div>Success Rate</div>
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-number">{commentStats.pending}</div>
+                                <div>Pending Actions</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Getting Started Guide - Updated */}
                     <div className="card">
-                        <h3>🚀 Getting Started</h3>
-                        <p>Welcome to your LinkedIn Automation dashboard! Here's how to get started:</p>
-                        <ol>
-                            <li>Add content sources (RSS feeds, LinkedIn profiles)</li>
-                            <li>Let the system discover and process content</li>
-                            <li>Review and generate post drafts</li>
-                            <li>Schedule or publish your posts</li>
-                        </ol>
-                        <p>Start by adding your first content source in the Sources tab!</p>
+                        <h3>🚀 LinkedIn Automation Workflow</h3>
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '1rem'}}>
+                            <div>
+                                <h4 style={{color: '#0077b5', marginBottom: '1rem'}}>📰 Content Creation</h4>
+                                <ol style={{paddingLeft: '1.5rem'}}>
+                                    <li>Add content sources (RSS feeds, LinkedIn profiles)</li>
+                                    <li>Let the system discover and process content</li>
+                                    <li>Review and generate post drafts</li>
+                                    <li>Schedule or publish your posts</li>
+                                </ol>
+                                <div style={{marginTop: '1rem'}}>
+                                    <button 
+                                        className="btn btn-primary"
+                                        onClick={() => window.location.hash = 'sources'}
+                                        style={{marginRight: '0.5rem'}}
+                                    >
+                                        Add Sources
+                                    </button>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={() => window.location.hash = 'drafts'}
+                                    >
+                                        View Drafts
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h4 style={{color: '#0077b5', marginBottom: '1rem'}}>💬 Comment Automation</h4>
+                                <ol style={{paddingLeft: '1.5rem'}}>
+                                    <li>Discover LinkedIn posts for commenting</li>
+                                    <li>AI analyzes relevance and generates comments</li>
+                                    <li>Review and schedule comment opportunities</li>
+                                    <li>Track engagement and performance</li>
+                                </ol>
+                                <div style={{marginTop: '1rem'}}>
+                                    <button 
+                                        className="btn btn-primary"
+                                        onClick={() => window.location.hash = 'comment-discovery'}
+                                        style={{marginRight: '0.5rem'}}
+                                    >
+                                        Discover Posts
+                                    </button>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={() => window.location.hash = 'comment-queue'}
+                                    >
+                                        Comment Queue
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className="card" style={{marginTop: '2rem'}}>
+                        <h3>⚡ Quick Actions</h3>
+                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem'}}>
+                            <QuickActionButton 
+                                icon="🔍"
+                                title="Discover New Posts"
+                                description="Find commenting opportunities"
+                                onClick={async () => {
+                                    try {
+                                        await apiCall('/engagement/discover-posts', { method: 'POST' });
+                                        addToast('Post discovery started!', 'success');
+                                    } catch (err) {
+                                        addToast('Discovery failed: ' + err.message, 'error');
+                                    }
+                                }}
+                            />
+                            
+                            <QuickActionButton 
+                                icon="🎯"
+                                title="Smart Content Selection"
+                                description="Select content using AI"
+                                onClick={async () => {
+                                    try {
+                                        await apiCall('/content/select-content', { method: 'POST' });
+                                        addToast('Content selection completed!', 'success');
+                                    } catch (err) {
+                                        addToast('Selection failed: ' + err.message, 'error');
+                                    }
+                                }}
+                            />
+                            
+                            <QuickActionButton 
+                                icon="📝"
+                                title="Generate Drafts"
+                                description="Create new post drafts"
+                                onClick={() => setActiveTab('drafts')}
+                            />
+                            
+                            <QuickActionButton 
+                                icon="⚙️"
+                                title="Update Preferences"
+                                description="Configure content preferences"
+                                onClick={() => window.open('/content_preferences.html', '_blank')}
+                            />
+                        </div>
+                    </div>
+
+                    {/* System Status - Updated */}
+                    <div className="card" style={{marginTop: '2rem'}}>
+                        <h3>🔧 System Status</h3>
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '1rem'}}>
+                            <div>
+                                <h4>Content Pipeline Health</h4>
+                                <SystemHealthIndicator 
+                                    label="Active Sources"
+                                    value={stats.active_sources}
+                                    threshold={1}
+                                    type="sources"
+                                />
+                                <SystemHealthIndicator 
+                                    label="Content Processing"
+                                    value={stats.content_items > 0 ? "Active" : "Inactive"}
+                                    threshold={0}
+                                    type="processing"
+                                />
+                                <SystemHealthIndicator 
+                                    label="Draft Generation"
+                                    value={stats.drafts > 0 ? "Working" : "No Drafts"}
+                                    threshold={0}
+                                    type="drafts"
+                                />
+                            </div>
+                            
+                            <div>
+                                <h4>Comment Automation Health</h4>
+                                <SystemHealthIndicator 
+                                    label="Opportunity Discovery"
+                                    value={commentStats.opportunities > 0 ? "Active" : "No Opportunities"}
+                                    threshold={0}
+                                    type="discovery"
+                                />
+                                <SystemHealthIndicator 
+                                    label="Comment Success Rate"
+                                    value={`${commentStats.success_rate.toFixed(0)}%`}
+                                    threshold={50}
+                                    type="success_rate"
+                                />
+                                <SystemHealthIndicator 
+                                    label="Pending Actions"
+                                    value={commentStats.pending}
+                                    threshold={10}
+                                    type="pending"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Quick Action Button Component
+        const QuickActionButton = ({ icon, title, description, onClick }) => {
+            const [loading, setLoading] = useState(false);
+
+            const handleClick = async () => {
+                if (typeof onClick === 'function') {
+                    setLoading(true);
+                    try {
+                        await onClick();
+                    } catch (err) {
+                        console.error('Quick action failed:', err);
+                    } finally {
+                        setLoading(false);
+                    }
+                }
+            };
+
+            return (
+                <div 
+                    className="card" 
+                    style={{
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: '2px solid transparent',
+                        padding: '1rem'
+                    }}
+                    onClick={handleClick}
+                    onMouseEnter={(e) => {
+                        e.target.style.borderColor = '#0077b5';
+                        e.target.style.transform = 'translateY(-2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.target.style.borderColor = 'transparent';
+                        e.target.style.transform = 'translateY(0)';
+                    }}
+                >
+                    <div style={{textAlign: 'center'}}>
+                        <div style={{fontSize: '2rem', marginBottom: '0.5rem'}}>
+                            {loading ? <span className="loading-spinner" style={{width: '2rem', height: '2rem', borderWidth: '3px'}} /> : icon}
+                        </div>
+                        <h4 style={{margin: '0 0 0.5rem 0', color: '#0077b5'}}>{title}</h4>
+                        <p style={{margin: 0, fontSize: '0.9rem', color: '#666'}}>{description}</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // System Health Indicator Component
+        const SystemHealthIndicator = ({ label, value, threshold, type }) => {
+            const getHealthStatus = () => {
+                switch (type) {
+                    case 'sources':
+                        return value >= threshold ? 'healthy' : 'warning';
+                    case 'processing':
+                        return value === 'Active' ? 'healthy' : 'warning';
+                    case 'drafts':
+                        return value === 'Working' ? 'healthy' : 'info';
+                    case 'discovery':
+                        return value === 'Active' ? 'healthy' : 'info';
+                    case 'success_rate':
+                        const rate = parseFloat(value);
+                        if (rate >= 80) return 'healthy';
+                        if (rate >= 50) return 'warning';
+                        return 'error';
+                    case 'pending':
+                        if (value === 0) return 'info';
+                        if (value <= threshold) return 'healthy';
+                        return 'warning';
+                    default:
+                        return 'info';
+                }
+            };
+
+            const getStatusColor = (status) => {
+                switch (status) {
+                    case 'healthy': return '#28a745';
+                    case 'warning': return '#ffc107';
+                    case 'error': return '#dc3545';
+                    case 'info': return '#17a2b8';
+                    default: return '#6c757d';
+                }
+            };
+
+            const getStatusIcon = (status) => {
+                switch (status) {
+                    case 'healthy': return '✅';
+                    case 'warning': return '⚠️';
+                    case 'error': return '❌';
+                    case 'info': return 'ℹ️';
+                    default: return '⚪';
+                }
+            };
+
+            const status = getHealthStatus();
+
+            return (
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.5rem 0',
+                    borderBottom: '1px solid #f0f0f0'
+                }}>
+                    <span>{label}</span>
+                    <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                        <span style={{color: getStatusColor(status), fontWeight: 'bold'}}>{value}</span>
+                        <span>{getStatusIcon(status)}</span>
                     </div>
                 </div>
             );
@@ -1956,6 +2274,925 @@
                             </div>
                         </div>
                     )}
+                </div>
+            );
+        };
+
+        // CommentDiscoveryTab Component
+        const CommentDiscoveryTab = () => {
+            const [discoveryStatus, setDiscoveryStatus] = useState('idle');
+            const [discoveryConfig, setDiscoveryConfig] = useState({
+                max_posts: 50,
+                sources: ['feed'],
+                min_relevance_score: 0.6
+            });
+            const [lastDiscovery, setLastDiscovery] = useState(null);
+            const [opportunities, setOpportunities] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const { apiCall, addToast } = useApi();
+
+            useEffect(() => {
+                loadCommentOpportunities();
+            }, []);
+
+            const loadCommentOpportunities = async () => {
+                try {
+                    setLoading(true);
+                    const data = await apiCall('/engagement/comment-opportunities?limit=20');
+                    setOpportunities(data);
+                } catch (err) {
+                    console.error('Failed to load comment opportunities:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleDiscoverPosts = async () => {
+                try {
+                    setDiscoveryStatus('running');
+                    setLoading(true);
+                    
+                    const params = new URLSearchParams({
+                        max_posts: discoveryConfig.max_posts,
+                        sources: discoveryConfig.sources.join(',')
+                    });
+                    
+                    const result = await apiCall(`/engagement/discover-posts?${params}`, {
+                        method: 'POST'
+                    });
+                    
+                    setLastDiscovery(result);
+                    setDiscoveryStatus('completed');
+                    addToast(`Discovery completed! Found ${result.posts_found} posts, created ${result.opportunities_created} opportunities`, 'success');
+                    
+                    // Refresh opportunities list
+                    await loadCommentOpportunities();
+                    
+                } catch (err) {
+                    setDiscoveryStatus('failed');
+                    addToast('Post discovery failed: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleConfigChange = (field, value) => {
+                setDiscoveryConfig(prev => ({
+                    ...prev,
+                    [field]: value
+                }));
+            };
+
+            const handleBulkAction = async (action, opportunityIds) => {
+                try {
+                    setLoading(true);
+                    
+                    const result = await apiCall('/engagement/bulk-comment-actions', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            opportunity_ids: opportunityIds,
+                            action: action
+                        })
+                    });
+                    
+                    addToast(`Bulk ${action} completed: ${result.results.successful} successful, ${result.results.failed} failed`, 'success');
+                    await loadCommentOpportunities();
+                    
+                } catch (err) {
+                    addToast(`Bulk ${action} failed: ` + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Comment Discovery</h2>
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={loadCommentOpportunities}
+                                disabled={loading}
+                            >
+                                🔄 Refresh
+                            </button>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={handleDiscoverPosts}
+                                disabled={loading || discoveryStatus === 'running'}
+                            >
+                                {discoveryStatus === 'running' ? (
+                                    <>
+                                        <span className="loading-spinner" style={{width: '1em', height: '1em', marginRight: '0.5rem'}} />
+                                        Discovering...
+                                    </>
+                                ) : (
+                                    '🔍 Discover Posts'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Discovery Configuration */}
+                    <div className="card" style={{marginBottom: '2rem'}}>
+                        <h3>Discovery Configuration</h3>
+                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem'}}>
+                            <div className="form-group">
+                                <label>Max Posts to Analyze</label>
+                                <input
+                                    type="number"
+                                    className="form-control"
+                                    value={discoveryConfig.max_posts}
+                                    onChange={(e) => handleConfigChange('max_posts', parseInt(e.target.value))}
+                                    min="10"
+                                    max="100"
+                                />
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Discovery Sources</label>
+                                <select
+                                    className="form-control"
+                                    value={discoveryConfig.sources[0]}
+                                    onChange={(e) => handleConfigChange('sources', [e.target.value])}
+                                >
+                                    <option value="feed">LinkedIn Feed</option>
+                                    <option value="network">Network Posts</option>
+                                    <option value="industry">Industry Topics</option>
+                                </select>
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Relevance Threshold</label>
+                                <select
+                                    className="form-control"
+                                    value={discoveryConfig.min_relevance_score}
+                                    onChange={(e) => handleConfigChange('min_relevance_score', parseFloat(e.target.value))}
+                                >
+                                    <option value="0.5">50% - More Opportunities</option>
+                                    <option value="0.6">60% - Balanced</option>
+                                    <option value="0.7">70% - Higher Quality</option>
+                                    <option value="0.8">80% - Very Selective</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Discovery Status */}
+                    {lastDiscovery && (
+                        <div className="card" style={{marginBottom: '2rem'}}>
+                            <h3>Last Discovery Results</h3>
+                            <div className="stats" style={{marginTop: '1rem'}}>
+                                <div className="stat-card">
+                                    <div className="stat-number">{lastDiscovery.posts_found}</div>
+                                    <div>Posts Analyzed</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-number">{lastDiscovery.opportunities_created}</div>
+                                    <div>Opportunities Created</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-number">{lastDiscovery.processing_time?.toFixed(1)}s</div>
+                                    <div>Processing Time</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Comment Opportunities */}
+                    <div className="card">
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                            <h3>Comment Opportunities ({opportunities.length})</h3>
+                            {opportunities.length > 0 && (
+                                <div style={{display: 'flex', gap: '0.5rem'}}>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={() => {
+                                            const selectedIds = opportunities.map(opp => opp.id);
+                                            handleBulkAction('schedule', selectedIds);
+                                        }}
+                                        disabled={loading}
+                                    >
+                                        📅 Schedule All
+                                    </button>
+                                    <button 
+                                        className="btn btn-primary"
+                                        onClick={() => {
+                                            const highPriorityIds = opportunities
+                                                .filter(opp => opp.priority === 'high' || opp.priority === 'urgent')
+                                                .map(opp => opp.id);
+                                            if (highPriorityIds.length > 0) {
+                                                handleBulkAction('execute', highPriorityIds);
+                                            } else {
+                                                addToast('No high priority opportunities found', 'warning');
+                                            }
+                                        }}
+                                        disabled={loading}
+                                    >
+                                        🚀 Execute High Priority
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {loading && opportunities.length === 0 ? (
+                            <div className="loading">Loading opportunities...</div>
+                        ) : opportunities.length === 0 ? (
+                            <div className="empty-state">
+                                <h4>No comment opportunities found</h4>
+                                <p>Run post discovery to find new commenting opportunities!</p>
+                            </div>
+                        ) : (
+                            <div>
+                                {opportunities.map(opportunity => (
+                                    <CommentOpportunityCard 
+                                        key={opportunity.id} 
+                                        opportunity={opportunity}
+                                        onUpdate={loadCommentOpportunities}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // CommentOpportunityCard Component
+        const CommentOpportunityCard = ({ opportunity, onUpdate }) => {
+            const [expanded, setExpanded] = useState(false);
+            const [generatedComment, setGeneratedComment] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const { apiCall, addToast } = useApi();
+
+            const getPriorityColor = (priority) => {
+                switch (priority) {
+                    case 'urgent': return '#dc3545';
+                    case 'high': return '#fd7e14';
+                    case 'medium': return '#ffc107';
+                    case 'low': return '#6c757d';
+                    default: return '#6c757d';
+                }
+            };
+
+            const getStatusColor = (status) => {
+                switch (status) {
+                    case 'pending': return '#6c757d';
+                    case 'scheduled': return '#ffc107';
+                    case 'completed': return '#28a745';
+                    case 'failed': return '#dc3545';
+                    default: return '#6c757d';
+                }
+            };
+
+            const handleGenerateComment = async (approach = 'thoughtful') => {
+                try {
+                    setLoading(true);
+                    const result = await apiCall(`/engagement/comment-opportunities/${opportunity.id}/generate-comment?comment_approach=${approach}`, {
+                        method: 'POST'
+                    });
+                    
+                    setGeneratedComment(result);
+                    addToast('Comment generated successfully!', 'success');
+                    
+                } catch (err) {
+                    addToast('Failed to generate comment: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleExecuteComment = async () => {
+                try {
+                    setLoading(true);
+                    const result = await apiCall(`/engagement/comment-opportunities/${opportunity.id}/execute`, {
+                        method: 'POST'
+                    });
+                    
+                    if (result.success) {
+                        addToast('Comment posted successfully!', 'success');
+                        onUpdate();
+                    } else {
+                        addToast('Comment execution failed: ' + result.error_message, 'error');
+                    }
+                    
+                } catch (err) {
+                    addToast('Failed to execute comment: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleScheduleComment = async () => {
+                try {
+                    setLoading(true);
+                    const result = await apiCall(`/engagement/comment-opportunities/${opportunity.id}/schedule`, {
+                        method: 'POST'
+                    });
+                    
+                    addToast('Comment scheduled successfully!', 'success');
+                    onUpdate();
+                    
+                } catch (err) {
+                    addToast('Failed to schedule comment: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSkip = async () => {
+                try {
+                    setLoading(true);
+                    await apiCall(`/engagement/opportunities/${opportunity.id}/skip`, {
+                        method: 'POST'
+                    });
+                    
+                    addToast('Opportunity skipped', 'success');
+                    onUpdate();
+                    
+                } catch (err) {
+                    addToast('Failed to skip opportunity: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="card" style={{marginBottom: '1rem', border: `2px solid ${getPriorityColor(opportunity.priority)}20`}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem'}}>
+                        <div style={{flex: 1}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem'}}>
+                                <h4 style={{margin: 0}}>Post by {opportunity.target_author}</h4>
+                                <span 
+                                    className="tag" 
+                                    style={{background: getPriorityColor(opportunity.priority), color: 'white'}}
+                                >
+                                    {opportunity.priority?.toUpperCase()}
+                                </span>
+                                <span 
+                                    className="tag" 
+                                    style={{background: getStatusColor(opportunity.status), color: 'white'}}
+                                >
+                                    {opportunity.status?.toUpperCase()}
+                                </span>
+                            </div>
+                            
+                            {opportunity.relevance_score && (
+                                <div style={{marginBottom: '0.5rem'}}>
+                                    <span className="tag">Relevance: {opportunity.relevance_score}%</span>
+                                    {opportunity.context_tags?.map(tag => (
+                                        <span key={tag} className="tag">{tag}</span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <button 
+                            className="btn btn-secondary"
+                            onClick={() => setExpanded(!expanded)}
+                            style={{padding: '0.25rem 0.5rem'}}
+                        >
+                            {expanded ? '▼' : '▶'}
+                        </button>
+                    </div>
+
+                    <p style={{
+                        display: '-webkit-box',
+                        WebkitLineClamp: expanded ? 'none' : 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        marginBottom: '1rem',
+                        color: '#666'
+                    }}>
+                        {opportunity.target_content}
+                    </p>
+
+                    {opportunity.engagement_reason && (
+                        <p style={{fontStyle: 'italic', color: '#666', marginBottom: '1rem'}}>
+                            <strong>Why comment:</strong> {opportunity.engagement_reason}
+                        </p>
+                    )}
+
+                    {expanded && (
+                        <div>
+                            {/* Generated Comment Section */}
+                            {generatedComment && (
+                                <div style={{
+                                    background: '#f8f9fa',
+                                    padding: '1rem',
+                                    borderRadius: '8px',
+                                    marginBottom: '1rem',
+                                    border: '1px solid #e9ecef'
+                                }}>
+                                    <h5>Generated Comment:</h5>
+                                    <p style={{fontStyle: 'italic', marginBottom: '0.5rem'}}>{generatedComment.comment_text}</p>
+                                    <div style={{fontSize: '0.9rem', color: '#666'}}>
+                                        <span className="tag">Confidence: {(generatedComment.confidence_score * 100).toFixed(0)}%</span>
+                                        <span className="tag">Approach: {generatedComment.approach_used}</span>
+                                    </div>
+                                    {generatedComment.alternative_comments?.length > 0 && (
+                                        <details style={{marginTop: '0.5rem'}}>
+                                            <summary style={{cursor: 'pointer', color: '#0077b5'}}>
+                                                Alternative comments ({generatedComment.alternative_comments.length})
+                                            </summary>
+                                            <ul style={{marginTop: '0.5rem', paddingLeft: '1rem'}}>
+                                                {generatedComment.alternative_comments.map((alt, idx) => (
+                                                    <li key={idx} style={{marginBottom: '0.25rem'}}>{alt}</li>
+                                                ))}
+                                            </ul>
+                                        </details>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Comment Generation Options */}
+                            <div style={{marginBottom: '1rem'}}>
+                                <h5>Generate Comment:</h5>
+                                <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                                    {['thoughtful', 'expert_insight', 'engaging_question', 'supportive'].map(approach => (
+                                        <button
+                                            key={approach}
+                                            className="btn btn-secondary"
+                                            onClick={() => handleGenerateComment(approach)}
+                                            disabled={loading}
+                                            style={{fontSize: '0.9rem', padding: '0.25rem 0.5rem'}}
+                                        >
+                                            {loading ? <span className="loading-spinner" style={{width: '0.8em', height: '0.8em'}} /> : ''}
+                                            {approach.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <div>
+                            <small style={{color: '#666'}}>
+                                Created: {new Date(opportunity.created_at).toLocaleString()}
+                                {opportunity.target_url && (
+                                    <>
+                                        {' • '}
+                                        <a 
+                                            href={opportunity.target_url} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            style={{color: '#0077b5'}}
+                                        >
+                                            View Post
+                                        </a>
+                                    </>
+                                )}
+                            </small>
+                        </div>
+                        
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                            {opportunity.status === 'pending' && (
+                                <>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={handleSkip}
+                                        disabled={loading}
+                                        style={{fontSize: '0.9rem'}}
+                                    >
+                                        ⏭️ Skip
+                                    </button>
+                                    <button 
+                                        className="btn btn-secondary"
+                                        onClick={handleScheduleComment}
+                                        disabled={loading}
+                                        style={{fontSize: '0.9rem'}}
+                                    >
+                                        📅 Schedule
+                                    </button>
+                                    <button 
+                                        className="btn btn-primary"
+                                        onClick={handleExecuteComment}
+                                        disabled={loading}
+                                        style={{fontSize: '0.9rem'}}
+                                    >
+                                        {loading ? <span className="loading-spinner" style={{width: '0.8em', height: '0.8em'}} /> : '🚀'} 
+                                        Comment Now
+                                    </button>
+                                </>
+                            )}
+                            
+                            {opportunity.status === 'scheduled' && (
+                                <span className="tag" style={{background: '#ffc107', color: '#000'}}>
+                                    Scheduled for {opportunity.scheduled_for ? new Date(opportunity.scheduled_for).toLocaleString() : 'Optimal Time'}
+                                </span>
+                            )}
+                            
+                            {opportunity.status === 'completed' && (
+                                <span className="tag" style={{background: '#28a745', color: 'white'}}>
+                                    ✅ Comment Posted
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CommentQueueTab Component
+        const CommentQueueTab = () => {
+            const [queueItems, setQueueItems] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [statusFilter, setStatusFilter] = useState('');
+            const [selectedItems, setSelectedItems] = useState(new Set());
+            const { apiCall, addToast } = useApi();
+
+            useEffect(() => {
+                loadCommentQueue();
+            }, [statusFilter]);
+
+            const loadCommentQueue = async () => {
+                try {
+                    setLoading(true);
+                    const params = new URLSearchParams({
+                        limit: '100'
+                    });
+                    if (statusFilter) {
+                        params.append('status_filter', statusFilter);
+                    }
+                    
+                    const data = await apiCall(`/engagement/comment-queue?${params}`);
+                    setQueueItems(data);
+                } catch (err) {
+                    console.error('Failed to load comment queue:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleItemSelection = (itemId, selected) => {
+                const newSelected = new Set(selectedItems);
+                if (selected) {
+                    newSelected.add(itemId);
+                } else {
+                    newSelected.delete(itemId);
+                }
+                setSelectedItems(newSelected);
+            };
+
+            const handleSelectAll = (selectAll) => {
+                if (selectAll) {
+                    setSelectedItems(new Set(queueItems.map(item => item.id)));
+                } else {
+                    setSelectedItems(new Set());
+                }
+            };
+
+            const handleBulkAction = async (action) => {
+                if (selectedItems.size === 0) {
+                    addToast('Please select items to perform bulk action', 'warning');
+                    return;
+                }
+
+                try {
+                    setLoading(true);
+                    
+                    const result = await apiCall('/engagement/bulk-comment-actions', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            opportunity_ids: Array.from(selectedItems),
+                            action: action
+                        })
+                    });
+                    
+                    addToast(`Bulk ${action} completed: ${result.results.successful} successful`, 'success');
+                    setSelectedItems(new Set());
+                    await loadCommentQueue();
+                    
+                } catch (err) {
+                    addToast(`Bulk ${action} failed: ` + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const getStatusCounts = () => {
+                const counts = {
+                    pending: 0,
+                    scheduled: 0,
+                    completed: 0,
+                    failed: 0,
+                    skipped: 0
+                };
+                
+                queueItems.forEach(item => {
+                    counts[item.status] = (counts[item.status] || 0) + 1;
+                });
+                
+                return counts;
+            };
+
+            const statusCounts = getStatusCounts();
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Comment Queue</h2>
+                        <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                            <select
+                                className="form-control"
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                style={{width: 'auto', minWidth: '150px'}}
+                            >
+                                <option value="">All Status</option>
+                                <option value="pending">Pending ({statusCounts.pending})</option>
+                                <option value="scheduled">Scheduled ({statusCounts.scheduled})</option>
+                                <option value="completed">Completed ({statusCounts.completed})</option>
+                                <option value="failed">Failed ({statusCounts.failed})</option>
+                                <option value="skipped">Skipped ({statusCounts.skipped})</option>
+                            </select>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={loadCommentQueue}
+                                disabled={loading}
+                            >
+                                🔄 Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Queue Statistics */}
+                    <div className="stats" style={{marginBottom: '2rem'}}>
+                        <div className="stat-card">
+                            <div className="stat-number">{statusCounts.pending}</div>
+                            <div>Pending</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{statusCounts.scheduled}</div>
+                            <div>Scheduled</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{statusCounts.completed}</div>
+                            <div>Completed</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{statusCounts.failed}</div>
+                            <div>Failed</div>
+                        </div>
+                    </div>
+
+                    {/* Bulk Actions */}
+                    {queueItems.length > 0 && (
+                        <div className="card" style={{marginBottom: '2rem'}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                                    <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedItems.size === queueItems.length && queueItems.length > 0}
+                                            onChange={(e) => handleSelectAll(e.target.checked)}
+                                        />
+                                        Select All ({selectedItems.size} selected)
+                                    </label>
+                                </div>
+                                
+                                {selectedItems.size > 0 && (
+                                    <div style={{display: 'flex', gap: '0.5rem'}}>
+                                        <button 
+                                            className="btn btn-secondary"
+                                            onClick={() => handleBulkAction('schedule')}
+                                            disabled={loading}
+                                        >
+                                            📅 Schedule Selected
+                                        </button>
+                                        <button 
+                                            className="btn btn-secondary"
+                                            onClick={() => handleBulkAction('skip')}
+                                            disabled={loading}
+                                        >
+                                            ⏭️ Skip Selected
+                                        </button>
+                                        <button 
+                                            className="btn btn-primary"
+                                            onClick={() => handleBulkAction('execute')}
+                                            disabled={loading}
+                                        >
+                                            🚀 Execute Selected
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Queue Items */}
+                    <div className="card">
+                        {loading && queueItems.length === 0 ? (
+                            <div className="loading">Loading comment queue...</div>
+                        ) : queueItems.length === 0 ? (
+                            <div className="empty-state">
+                                <h4>No items in comment queue</h4>
+                                <p>Discover new posts to populate your comment queue!</p>
+                            </div>
+                        ) : (
+                            <div>
+                                {queueItems.map(item => (
+                                    <div key={item.id} style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '1rem',
+                                        padding: '1rem',
+                                        borderBottom: '1px solid #e9ecef',
+                                        background: selectedItems.has(item.id) ? '#f8f9fa' : 'transparent'
+                                    }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedItems.has(item.id)}
+                                            onChange={(e) => handleItemSelection(item.id, e.target.checked)}
+                                        />
+                                        
+                                        <div style={{flex: 1}}>
+                                            <CommentOpportunityCard 
+                                                opportunity={item}
+                                                onUpdate={loadCommentQueue}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // CommentAnalyticsTab Component
+        const CommentAnalyticsTab = () => {
+            const [analytics, setAnalytics] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [timeRange, setTimeRange] = useState(30);
+            const { apiCall } = useApi();
+
+            useEffect(() => {
+                loadAnalytics();
+            }, [timeRange]);
+
+            const loadAnalytics = async () => {
+                try {
+                    setLoading(true);
+                    const data = await apiCall(`/engagement/comment-analytics?days=${timeRange}`);
+                    setAnalytics(data);
+                } catch (err) {
+                    console.error('Failed to load comment analytics:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading && !analytics) {
+                return <div className="loading">Loading analytics...</div>;
+            }
+
+            if (!analytics) {
+                return (
+                    <div className="empty-state">
+                        <h3>No analytics data available</h3>
+                        <p>Start discovering and commenting on posts to see analytics!</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+                        <h2>Comment Analytics</h2>
+                        <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                            <select
+                                className="form-control"
+                                value={timeRange}
+                                onChange={(e) => setTimeRange(parseInt(e.target.value))}
+                                style={{width: 'auto'}}
+                            >
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                            </select>
+                            <button 
+                                className="btn btn-secondary"
+                                onClick={loadAnalytics}
+                                disabled={loading}
+                            >
+                                🔄 Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Key Metrics */}
+                    <div className="stats" style={{marginBottom: '2rem'}}>
+                        <div className="stat-card">
+                            <div className="stat-number">{analytics.total_comment_opportunities}</div>
+                            <div>Opportunities Found</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{analytics.comments_posted}</div>
+                            <div>Comments Posted</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{analytics.success_rate.toFixed(1)}%</div>
+                            <div>Success Rate</div>
+                        </div>
+                        <div className="stat-card">
+                            <div className="stat-number">{analytics.comments_pending}</div>
+                            <div>Pending</div>
+                        </div>
+                    </div>
+
+                    {/* Performance Breakdown */}
+                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem'}}>
+                        <div className="card">
+                            <h3>Comment Status Breakdown</h3>
+                            <div style={{marginTop: '1rem'}}>
+                                {[
+                                    {label: 'Posted', value: analytics.comments_posted, color: '#28a745'},
+                                    {label: 'Pending', value: analytics.comments_pending, color: '#6c757d'},
+                                    {label: 'Scheduled', value: analytics.comments_scheduled, color: '#ffc107'},
+                                    {label: 'Failed', value: analytics.comments_failed, color: '#dc3545'},
+                                    {label: 'Skipped', value: analytics.comments_skipped, color: '#6f42c1'}
+                                ].map(item => (
+                                    <div key={item.label} style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '0.5rem 0',
+                                        borderBottom: '1px solid #f0f0f0'
+                                    }}>
+                                        <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                            <div style={{
+                                                width: '12px',
+                                                height: '12px',
+                                                borderRadius: '50%',
+                                                background: item.color
+                                            }}></div>
+                                            {item.label}
+                                        </div>
+                                        <strong>{item.value}</strong>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <h3>Discovery Performance</h3>
+                            {analytics.discovery_metrics && (
+                                <div style={{marginTop: '1rem'}}>
+                                    <div style={{marginBottom: '1rem'}}>
+                                        <strong>Total Discovered:</strong> {analytics.discovery_metrics.total_discovered}
+                                    </div>
+                                    <div style={{marginBottom: '1rem'}}>
+                                        <strong>Avg per Day:</strong> {analytics.discovery_metrics.avg_opportunities_per_day?.toFixed(1)}
+                                    </div>
+                                    {analytics.discovery_metrics.sources_breakdown && (
+                                        <div>
+                                            <strong>Sources:</strong>
+                                            <ul style={{marginTop: '0.5rem', paddingLeft: '1rem'}}>
+                                                {Object.entries(analytics.discovery_metrics.sources_breakdown).map(([source, count]) => (
+                                                    <li key={source}>{source}: {count}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Insights */}
+                    <div className="card">
+                        <h3>Insights & Recommendations</h3>
+                        <div style={{marginTop: '1rem'}}>
+                            {analytics.success_rate > 80 && (
+                                <div className="alert alert-success">
+                                    🎉 Excellent performance! Your comment success rate is {analytics.success_rate.toFixed(1)}%
+                                </div>
+                            )}
+                            
+                            {analytics.success_rate < 50 && (
+                                <div className="alert alert-warning" style={{background: '#fff3cd', color: '#856404', border: '1px solid #ffeaa7'}}>
+                                    ⚠️ Low success rate ({analytics.success_rate.toFixed(1)}%). Consider adjusting your commenting criteria or timing.
+                                </div>
+                            )}
+                            
+                            {analytics.comments_pending > analytics.comments_posted && (
+                                <div className="alert alert-info" style={{background: '#d1ecf1', color: '#0c5460', border: '1px solid #bee5eb'}}>
+                                    💡 You have more pending opportunities than posted comments. Consider scheduling or executing pending opportunities.
+                                </div>
+                            )}
+                            
+                            {analytics.total_comment_opportunities === 0 && (
+                                <div className="alert alert-warning" style={{background: '#fff3cd', color: '#856404', border: '1px solid #ffeaa7'}}>
+                                    🔍 No opportunities found in the selected period. Try running post discovery to find new commenting opportunities.
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             );
         };

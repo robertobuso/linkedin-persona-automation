@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 class LinkedInAPIService:
     """Service for LinkedIn API operations (posting, commenting, discovery) - 2025 Updated."""
     
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, oauth_service: LinkedInOAuthService):
         self.session = session
-        self.user_repo = UserRepository(session)
+        self.user_repo = UserRepository(session) # Uses session
+        self.oauth_service = oauth_service      # Stores the passed-in oauth_service
         self.api_base = "https://api.linkedin.com/v2"
 
     async def _get_valid_token(self, user: User) -> str:
