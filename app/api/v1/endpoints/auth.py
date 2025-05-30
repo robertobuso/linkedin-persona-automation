@@ -9,13 +9,18 @@ from datetime import timedelta
 from typing import Any, Optional # Added Optional for clarity in some Pydantic models
 from uuid import UUID # Import UUID if your user IDs are UUIDs
 
-from fastapi import APIRouter, Depends, HTTPException, status, Body # Added Body for PasswordChange
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging # For logging errors
+import secrets
+from app.services.linkedin_oauth_service import LinkedInOAuthService
 
 # Assuming your logger is configured
 logger = logging.getLogger(__name__)
+
+# Initialize LinkedIn OAuth service
+linkedin_oauth = LinkedInOAuthService()
 
 from app.core.security import (
     create_access_token,
@@ -312,3 +317,125 @@ async def update_tone_profile(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to update tone profile: {str(e)}"
             )
+        
+@router.get("/linkedin/connect")
+async def connect_linkedin(
+    current_user: User = Depends(get_current_active_user_dependency)
+) -> dict:
+    """Initiate LinkedIn OAuth connection with OpenID Connect."""
+    state = secrets.token_urlsafe(32)
+    auth_url = linkedin_oauth.get_authorization_url(state)
+    
+    return {
+        "authorization_url": auth_url,
+        "state": state,
+        "message": "Redirect user to authorization_url to complete LinkedIn connection"
+    }
+
+@router.get("/linkedin/callback")
+async def linkedin_callback(
+    code: str = Query(..., description="Authorization code from LinkedIn"),
+    state: str = Query(..., description="CSRF state parameter"),
+    current_user: User = Depends(get_current_active_user_dependency),
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict:
+    """Handle LinkedIn OAuth callback with OpenID Connect support."""
+    async with db_session_context_manager as actual_session:
+        user_repo = UserRepository(actual_session)
+        
+        try:
+            # Exchange code for tokens (includes access_token and id_token)
+            token_data = await linkedin_oauth.exchange_code_for_tokens(code)
+            
+            # Get user profile using OpenID Connect userinfo endpoint
+            profile_data = await linkedin_oauth.get_user_profile(token_data["access_token"])
+            
+            # Alternative: Extract user info from ID token if available
+            if "id_token" in token_data:
+                id_token_data = linkedin_oauth.decode_id_token(token_data["id_token"])
+                logger.info(f"ID Token data: {id_token_data}")
+            
+            # Calculate token expiry
+            expires_at = linkedin_oauth.calculate_token_expiry(
+                token_data.get("expires_in", 3600)
+            )
+            
+            # Update user with LinkedIn tokens
+            updated_user = await user_repo.update_linkedin_tokens(
+                current_user.id,
+                access_token=token_data["access_token"],
+                refresh_token=token_data.get("refresh_token"),
+                expires_at=expires_at
+            )
+            
+            if not updated_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found"
+                )
+            
+            logger.info(f"LinkedIn connected for user {current_user.id}")
+            
+            return {
+                "message": "LinkedIn account connected successfully",
+                "linkedin_profile": {
+                    "sub": profile_data.get("sub"),  # OpenID Connect subject identifier
+                    "name": profile_data.get("name", ""),
+                    "given_name": profile_data.get("given_name", ""),
+                    "family_name": profile_data.get("family_name", ""),
+                    "picture": profile_data.get("picture", ""),
+                    "email": profile_data.get("email", ""),  # Only if email scope granted
+                },
+                "expires_at": expires_at.isoformat(),
+                "scopes": token_data.get("scope", "").split(",")
+            }
+            
+        except Exception as e:
+            logger.error(f"LinkedIn OAuth callback failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"LinkedIn connection failed: {str(e)}"
+            )
+
+@router.delete("/linkedin/disconnect")
+async def disconnect_linkedin(
+    current_user: User = Depends(get_current_active_user_dependency),
+    db_session_context_manager: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict:
+    """Disconnect LinkedIn account."""
+    async with db_session_context_manager as actual_session:
+        user_repo = UserRepository(actual_session)
+        await user_repo.clear_linkedin_tokens(current_user.id)
+        
+        logger.info(f"LinkedIn disconnected for user {current_user.id}")
+        
+        return {"message": "LinkedIn account disconnected successfully"}
+
+@router.get("/linkedin/status")
+async def linkedin_connection_status(
+    current_user: User = Depends(get_current_active_user_dependency)
+) -> dict:
+    """Get LinkedIn connection status for current user."""
+    is_connected = current_user.has_valid_linkedin_token()
+    
+    status_info = {
+        "connected": is_connected,
+        "has_token": bool(current_user.linkedin_access_token),
+        "token_expires_at": current_user.linkedin_token_expires_at.isoformat() if current_user.linkedin_token_expires_at else None
+    }
+
+    if is_connected:
+        try:
+            # Get basic profile info if connected using OpenID Connect
+            linkedin_service = LinkedInOAuthService()
+            profile_data = await linkedin_service.get_user_profile(current_user.linkedin_access_token)
+            status_info["profile"] = {
+                "name": profile_data.get("name", ""),
+                "picture": profile_data.get("picture", ""),
+                "email": profile_data.get("email", "")  # May be empty if email scope not granted
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get LinkedIn profile for user {current_user.id}: {e}")
+            status_info["profile"] = None
+
+    return status_info

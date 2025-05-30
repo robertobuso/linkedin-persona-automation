@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Authentication</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 16px;
+            backdrop-filter: blur(10px);
+            max-width: 500px;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .success {
+            color: #51cf66;
+            background: rgba(81, 207, 102, 0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="loading" style="display: block;">
+            <div class="loading-spinner"></div>
+            <h2>Connecting your LinkedIn account...</h2>
+            <p>Please wait while we complete the authentication process.</p>
+        </div>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = 'http://localhost:8000/api/v1';
+        
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const state = urlParams.get('state');
+        const error = urlParams.get('error');
+        const errorDescription = urlParams.get('error_description');
+
+        const statusDiv = document.getElementById('status');
+        const loadingDiv = document.getElementById('loading');
+
+        async function handleCallback() {
+            // Handle LinkedIn OAuth errors
+            if (error) {
+                loadingDiv.style.display = 'none';
+                statusDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ Authentication Error</h3>
+                        <p><strong>Error:</strong> ${error}</p>
+                        ${errorDescription ? `<p><strong>Details:</strong> ${errorDescription}</p>` : ''}
+                        <p>Please close this window and try again.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Check for required parameters
+            if (!code || !state) {
+                loadingDiv.style.display = 'none';
+                statusDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ Missing Parameters</h3>
+                        <p>Required authentication parameters are missing.</p>
+                        <p>Please close this window and try again.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            try {
+                // Get auth token from parent window (opener)
+                let token = null;
+                
+                // Try to get token from opener window
+                if (window.opener && window.opener.localStorage) {
+                    token = window.opener.localStorage.getItem('token');
+                }
+                
+                // Fallback: try to get from current window's localStorage
+                if (!token) {
+                    token = localStorage.getItem('token');
+                }
+                
+                if (!token) {
+                    throw new Error('Authentication token not found. Please make sure you are logged in to the main application.');
+                }
+
+                console.log('Making callback request with token:', token ? 'Present' : 'Missing');
+
+                // Call the callback endpoint with proper authentication
+                const response = await fetch(`${API_BASE}/auth/linkedin/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('API Error:', errorData);
+                    throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                console.log('Success result:', result);
+                
+                loadingDiv.style.display = 'none';
+                statusDiv.innerHTML = `
+                    <div class="success">
+                        <h3>✅ LinkedIn Connected Successfully!</h3>
+                        <p>${result.message}</p>
+                        ${result.linkedin_profile?.name ? `<p><strong>Connected as:</strong> ${result.linkedin_profile.name}</p>` : ''}
+                        <p>This window will close automatically in 3 seconds...</p>
+                    </div>
+                `;
+
+                // Notify parent window of success
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'linkedin-auth-success',
+                        data: result
+                    }, '*');
+                } else {
+                    console.warn('No opener window found to notify');
+                }
+
+                // Close window after delay
+                setTimeout(() => {
+                    window.close();
+                }, 3000);
+
+            } catch (err) {
+                console.error('LinkedIn callback error:', err);
+                loadingDiv.style.display = 'none';
+                statusDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ Connection Failed</h3>
+                        <p><strong>Error:</strong> ${err.message}</p>
+                        ${err.message.includes('token') ? 
+                            '<p><strong>Tip:</strong> Make sure you are logged in to the main application before connecting LinkedIn.</p>' : 
+                            '<p>Please close this window and try again.</p>'
+                        }
+                    </div>
+                `;
+            }
+        }
+
+        // Handle the callback when page loads
+        document.addEventListener('DOMContentLoaded', handleCallback);
+    </script>
+</body>
+</html>

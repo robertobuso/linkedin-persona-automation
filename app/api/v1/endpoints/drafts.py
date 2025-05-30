@@ -31,6 +31,7 @@ from app.schemas.api_schemas import ( # Ensure these schemas are correctly defin
 from app.models.user import User
 from app.models.content import DraftStatus # Ensure this Enum is defined
 from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
+from app.services.linkedin_api_service import LinkedInAPIService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -195,25 +196,33 @@ async def update_draft(
 
 @router.post("/{draft_id}/publish", response_model=PublishResponse)
 async def publish_draft(
-    draft_id: UUID, # Changed to UUID
+    draft_id: UUID,
     publish_request: PublishRequest,
-    background_tasks: BackgroundTasks, # Keep if needed for non-Celery background tasks
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PublishResponse:
-    """Publish or schedule a post draft."""
+    """Publish or schedule a post draft to LinkedIn."""
     async with db_session_cm as session:
         draft_repo = PostDraftRepository(session)
         draft = await draft_repo.get_by_id(draft_id)
-
+        
         if not draft:
             raise ContentNotFoundError(f"Draft {draft_id} not found")
-
+        
         if draft.user_id != current_user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
+        
+        # Check if user has LinkedIn connected
+        if not current_user.has_valid_linkedin_token():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="LinkedIn account not connected. Please connect your LinkedIn account first."
+            )
+        
         try:
             if publish_request.scheduled_time:
+                # Schedule for later
                 scheduled_draft = await draft_repo.schedule_draft(
                     draft_id=draft_id,
                     scheduled_time=publish_request.scheduled_time
@@ -226,27 +235,48 @@ async def publish_draft(
                         message=f"Post scheduled for {publish_request.scheduled_time}"
                     )
             else:
-                # This part is still a mock for LinkedIn API
-                # The actual call to LinkedInService would happen here or in a Celery task
-                published_draft = await draft_repo.mark_as_published(
-                    draft_id=draft_id,
-                    linkedin_post_id=f"mock_linkedin_post_{draft_id}",
-                    linkedin_post_url=f"https://linkedin.com/posts/mock_{draft_id}"
-                )
-                if published_draft:
-                    # background_tasks.add_task(lambda: None, draft_id) # Placeholder
-                    return PublishResponse(
-                        draft_id=str(draft_id),
-                        status="published",
-                        linkedin_post_id=f"mock_linkedin_post_{draft_id}",
-                        linkedin_post_url=f"https://linkedin.com/posts/mock_{draft_id}",
-                        message="Post (mock) published successfully"
+                # Publish immediately to LinkedIn
+                linkedin_service = LinkedInAPIService(session)
+                
+                try:
+                    # Create LinkedIn post
+                    linkedin_response = await linkedin_service.create_post(
+                        user=current_user,
+                        content=draft.content,
+                        visibility="PUBLIC"
                     )
-            
-            # Fallback if neither scheduling nor direct publishing logic leads to a return
-            logger.error(f"Publish logic did not result in a response for draft {draft_id}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to publish draft")
-
+                    
+                    # Extract LinkedIn post ID and URL
+                    linkedin_post_id = linkedin_response.get("id")
+                    linkedin_post_url = f"https://www.linkedin.com/feed/update/{linkedin_post_id}" if linkedin_post_id else None
+                    
+                    # Mark draft as published
+                    published_draft = await draft_repo.mark_as_published(
+                        draft_id=draft_id,
+                        linkedin_post_id=linkedin_post_id,
+                        linkedin_post_url=linkedin_post_url
+                    )
+                    
+                    if published_draft:
+                        return PublishResponse(
+                            draft_id=str(draft_id),
+                            status="published",
+                            linkedin_post_id=linkedin_post_id,
+                            linkedin_post_url=linkedin_post_url,
+                            message="Post published successfully to LinkedIn"
+                        )
+                
+                except Exception as linkedin_error:
+                    logger.error(f"LinkedIn publishing failed for draft {draft_id}: {linkedin_error}")
+                    await draft_repo.update(draft_id, status=DraftStatus.FAILED)
+                    
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to publish to LinkedIn: {str(linkedin_error)}"
+                    )
+        
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to publish draft {draft_id}: {e}", exc_info=True)
             raise HTTPException(

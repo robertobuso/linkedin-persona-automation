@@ -752,6 +752,196 @@
             );
         };
 
+        // LinkedIn Status
+        const LinkedInConnectionStatus = () => {
+            const [status, setStatus] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [connecting, setConnecting] = useState(false);
+            const { apiCall, addToast } = useApi();
+
+            useEffect(() => {
+                loadStatus();
+            }, []);
+
+            const loadStatus = async () => {
+                try {
+                    const data = await apiCall('/auth/linkedin/status');
+                    setStatus(data);
+                } catch (err) {
+                    console.error('Failed to load LinkedIn status:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleConnect = async () => {
+                setConnecting(true);
+                try {
+                    const response = await apiCall('/auth/linkedin/connect');
+                    console.log('LinkedIn connect response:', response);
+                    
+                    // Create a unique popup window
+                    const popup = window.open(
+                        response.authorization_url,
+                        'linkedin-auth-popup',
+                        'width=600,height=700,scrollbars=yes,resizable=yes,centerscreen=yes'
+                    );
+
+                    if (!popup) {
+                        throw new Error('Failed to open popup window. Please allow popups for this site.');
+                    }
+
+                    // Monitor popup for completion
+                    let messageReceived = false;
+                    
+                    const checkClosed = setInterval(() => {
+                        if (popup.closed && !messageReceived) {
+                            clearInterval(checkClosed);
+                            setConnecting(false);
+                            addToast('LinkedIn connection was cancelled or failed', 'warning');
+                        }
+                    }, 1000);
+
+                    // Listen for successful auth message from popup
+                    const messageHandler = (event) => {
+                        console.log('Received message:', event.data);
+                        
+                        if (event.data?.type === 'linkedin-auth-success') {
+                            messageReceived = true;
+                            clearInterval(checkClosed);
+                            
+                            popup.close();
+                            setConnecting(false);
+                            
+                            addToast('LinkedIn connected successfully!', 'success');
+                            loadStatus(); // Refresh the status
+                            
+                            window.removeEventListener('message', messageHandler);
+                        }
+                    };
+                    
+                    window.addEventListener('message', messageHandler);
+
+                    // Clean up if popup is closed manually
+                    const cleanupHandler = () => {
+                        clearInterval(checkClosed);
+                        window.removeEventListener('message', messageHandler);
+                        setConnecting(false);
+                    };
+
+                    // Set a timeout to clean up after 5 minutes
+                    setTimeout(() => {
+                        if (!messageReceived && !popup.closed) {
+                            popup.close();
+                            cleanupHandler();
+                            addToast('LinkedIn connection timed out', 'error');
+                        }
+                    }, 300000); // 5 minutes
+
+                } catch (err) {
+                    console.error('LinkedIn connection error:', err);
+                    addToast('Failed to connect LinkedIn: ' + err.message, 'error');
+                    setConnecting(false);
+                }
+            };
+
+            const handleDisconnect = async () => {
+                if (!confirm('Are you sure you want to disconnect your LinkedIn account?')) {
+                    return;
+                }
+
+                try {
+                    await apiCall('/auth/linkedin/disconnect', { method: 'DELETE' });
+                    setStatus({ ...status, connected: false, has_token: false, profile: null });
+                    addToast('LinkedIn disconnected successfully', 'success');
+                } catch (err) {
+                    addToast('Failed to disconnect LinkedIn: ' + err.message, 'error');
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="card">
+                        <h3>🔗 LinkedIn Connection</h3>
+                        <div className="loading">Loading LinkedIn status...</div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="card">
+                    <h3>🔗 LinkedIn Connection</h3>
+                    
+                    {status?.connected ? (
+                        <div>
+                            <div className="alert alert-success">
+                                ✅ LinkedIn account is connected
+                                {status.profile && (
+                                    <div style={{marginTop: '0.5rem'}}>
+                                        <strong>Connected as:</strong> {status.profile.name || 'LinkedIn User'}
+                                    </div>
+                                )}
+                                {status.token_expires_at && (
+                                    <div style={{fontSize: '0.9rem', marginTop: '0.25rem', color: '#666'}}>
+                                        <strong>Token expires:</strong> {new Date(status.token_expires_at).toLocaleString()}
+                                    </div>
+                                )}
+                            </div>
+                            <button 
+                                className="btn btn-danger"
+                                onClick={handleDisconnect}
+                            >
+                                Disconnect LinkedIn
+                            </button>
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="alert alert-warning" style={{background: '#fff3cd', color: '#856404', border: '1px solid #ffeaa7'}}>
+                                ⚠️ LinkedIn account not connected. Connect your LinkedIn account to publish posts and engage with content.
+                            </div>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={handleConnect}
+                                disabled={connecting}
+                                style={{
+                                    opacity: connecting ? 0.7 : 1,
+                                    cursor: connecting ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {connecting ? (
+                                    <>
+                                        <span className="loading-spinner" style={{
+                                            width: '1em', 
+                                            height: '1em', 
+                                            marginRight: '0.5rem',
+                                            display: 'inline-block',
+                                            border: '2px solid rgba(255,255,255,0.3)',
+                                            borderTop: '2px solid white',
+                                            borderRadius: '50%',
+                                            animation: 'spin 1s linear infinite'
+                                        }}></span>
+                                        Connecting to LinkedIn...
+                                    </>
+                                ) : (
+                                    '🔗 Connect LinkedIn'
+                                )}
+                            </button>
+                        </div>
+                    )}
+
+                    <div style={{marginTop: '1rem', fontSize: '0.9rem', color: '#666'}}>
+                        <h4>What LinkedIn connection enables:</h4>
+                        <ul style={{marginTop: '0.5rem', paddingLeft: '1.5rem', textAlign: 'left'}}>
+                            <li>Publish posts directly to your LinkedIn feed</li>
+                            <li>Comment on LinkedIn posts automatically</li>
+                            <li>Like posts and engage with your network</li>
+                            <li>Track performance of your published content</li>
+                        </ul>
+                    </div>
+                </div>
+            );
+        };
+
         // Dashboard Component
         const Dashboard = ({ user }) => {
             const [activeTab, setActiveTab] = useState('overview');
@@ -1221,7 +1411,6 @@
                     const data = await apiCall('/preferences/preferences');
                     setPreferences(data);
                 } catch (err) {
-                    // If no preferences exist, that's OK
                     if (err.message.includes('not found')) {
                         setPreferences(null);
                     } else {
@@ -1255,7 +1444,7 @@
             return (
                 <div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
-                        <h2>Content Preferences</h2>
+                        <h2>Settings & Preferences</h2>
                         <div style={{display: 'flex', gap: '0.5rem'}}>
                             <button 
                                 className="btn btn-secondary"
@@ -1270,7 +1459,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
-                                ⚙️ Manage Preferences
+                                ⚙️ Content Preferences
                             </a>
                         </div>
                     </div>
@@ -1279,9 +1468,13 @@
                         <div className="alert alert-error">{error}</div>
                     )}
 
+                    {/* ADD THIS: LinkedIn Connection Status */}
+                    <LinkedInConnectionStatus />
+
+                    {/* Existing preferences display */}
                     {preferences ? (
                         <div className="card">
-                            <h3>Current Preferences</h3>
+                            <h3>Content Preferences</h3>
                             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem'}}>
                                 {preferences.job_role && (
                                     <div><strong>Job Role:</strong> {preferences.job_role}</div>

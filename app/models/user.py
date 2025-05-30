@@ -3,7 +3,7 @@ Updated User model with enhanced content preferences support and relationships.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlalchemy import Column, String, DateTime, Boolean, Text, Integer, ForeignKey, Float, desc
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -321,14 +321,19 @@ class User(Base):
         self.tone_profile = current_tone
     
     def has_valid_linkedin_token(self) -> bool:
-        """Check if user has a valid LinkedIn access token."""
-        if not self.linkedin_access_token:
+        """Check if the user has a valid (non-expired) LinkedIn access token."""
+        if not self.linkedin_access_token or not self.linkedin_token_expires_at:
             return False
         
-        if not self.linkedin_token_expires_at:
-            return False
+        # Use timezone-aware datetime for comparison
+        now = datetime.now(timezone.utc)
         
-        return datetime.utcnow() < self.linkedin_token_expires_at
+        # If stored datetime is naive, make it timezone-aware (assuming UTC)
+        expires_at = self.linkedin_token_expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        
+        return now < expires_at
     
     def get_posting_schedule(self) -> List[str]:
         """Get user's preferred posting times."""
