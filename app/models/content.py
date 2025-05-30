@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List
 from enum import Enum
 from sqlalchemy import Column, String, DateTime, Boolean, Text, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from app.database.connection import Base
 
@@ -41,6 +41,16 @@ class DraftStatus(str, Enum):
     PUBLISHED = "published"
     FAILED = "failed"
     ARCHIVED = "archived"
+
+
+def truncate_field(value: Optional[str], max_length: int) -> Optional[str]:
+    """Safely truncate a string field to maximum length."""
+    if value is None:
+        return None
+    if len(value) <= max_length:
+        return value
+    # Truncate with ellipsis if too long
+    return value[:max_length-3] + "..." if max_length > 3 else value[:max_length]
 
 
 class ContentSource(Base):
@@ -217,8 +227,7 @@ class ContentItem(Base):
     """
     Content item model representing individual pieces of content from sources.
     
-    Stores raw content data, metadata, and processing status for content
-    that will be used to generate LinkedIn posts.
+    Updated with increased field lengths to handle real-world content data.
     """
     
     __tablename__ = "content_items"
@@ -241,15 +250,15 @@ class ContentItem(Base):
         doc="Content source that provided this item"
     )
     
-    # Content metadata
+    # Content metadata - INCREASED FIELD LENGTHS
     title = Column(
-        String(500),
+        String(1000),  # Increased from 500 to 1000
         nullable=False,
         doc="Content title or headline"
     )
     
     url = Column(
-        String(1000),
+        String(2000),  # Increased from 1000 to 2000
         nullable=False,
         unique=True,
         index=True,
@@ -257,7 +266,7 @@ class ContentItem(Base):
     )
     
     author = Column(
-        String(255),
+        String(500),  # Increased from 255 to 500
         nullable=True,
         doc="Content author or publisher"
     )
@@ -284,7 +293,7 @@ class ContentItem(Base):
     
     # Content classification
     category = Column(
-        String(100),
+        String(200),  # Increased from 100 to 200
         nullable=True,
         index=True,
         doc="Content category or topic"
@@ -376,10 +385,52 @@ class ContentItem(Base):
         doc="Post drafts generated from this content"
     )
     
+    # Validation methods
+    @validates('title')
+    def validate_title(self, key, title):
+        """Validate and truncate title if necessary."""
+        return truncate_field(title, 1000)
+    
+    @validates('url')
+    def validate_url(self, key, url):
+        """Validate and truncate URL if necessary."""
+        return truncate_field(url, 2000)
+    
+    @validates('author')
+    def validate_author(self, key, author):
+        """Validate and truncate author if necessary."""
+        return truncate_field(author, 500)
+    
+    @validates('category')
+    def validate_category(self, key, category):
+        """Validate and truncate category if necessary."""
+        return truncate_field(category, 200)
+    
     def __repr__(self) -> str:
         """String representation of ContentItem instance."""
-        return f"<ContentItem(id={self.id}, title='{self.title[:50]}...', status='{self.status}')>"
-
+        title_preview = self.title[:50] + "..." if len(self.title) > 50 else self.title
+        return f"<ContentItem(id={self.id}, title='{title_preview}', status='{self.status}')>"
+    
+    @classmethod
+    def create_safe(cls, **kwargs):
+        """
+        Create ContentItem with automatic field truncation.
+        
+        This method ensures all string fields are within their limits
+        before creating the instance.
+        """
+        # Safely truncate fields before creation
+        if 'title' in kwargs:
+            kwargs['title'] = truncate_field(kwargs['title'], 1000)
+        if 'url' in kwargs:
+            kwargs['url'] = truncate_field(kwargs['url'], 2000)
+        if 'author' in kwargs:
+            kwargs['author'] = truncate_field(kwargs['author'], 500)
+        if 'category' in kwargs:
+            kwargs['category'] = truncate_field(kwargs['category'], 200)
+        
+        return cls(**kwargs)
+    
 
 class PostDraft(Base):
     """

@@ -176,6 +176,7 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 
+
 def get_db_session() -> AsyncSessionContextManager:
     """
     FastAPI dependency to get a database session context manager.
@@ -258,3 +259,88 @@ async def run_migrations():
     """Database migrations are expected to be handled by the entrypoint script."""
     logger.info("Database migrations are expected to be handled by the entrypoint script.")
     pass
+
+
+# Independent background session maker
+_background_engine = None
+_background_session_maker = None
+
+def _get_database_url():
+    """Get database URL from environment."""
+    return os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/db_name")
+
+def _initialize_background_engine():
+    """Initialize background database engine if not already done."""
+    global _background_engine, _background_session_maker
+    
+    if _background_engine is None:
+        database_url = _get_database_url()
+        
+        _background_engine = create_async_engine(
+            database_url,
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+        )
+        
+        _background_session_maker = async_sessionmaker(
+            bind=_background_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        
+        logger.info("Initialized independent background database engine")
+
+@asynccontextmanager
+async def get_db_session_directly() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Create an independent database session for background tasks.
+    
+    This doesn't depend on the main app's db_manager and creates its own connection.
+    """
+    # Initialize if needed
+    _initialize_background_engine()
+    
+    session = _background_session_maker()
+    try:
+        yield session
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Background session error: {str(e)}")
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
+# Alternative: Use the existing engine if available
+@asynccontextmanager  
+async def get_db_session_from_existing() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Try to use existing database setup, fallback to independent session.
+    """
+    try:
+        # Try to use the existing database setup
+        from app.database.connection import db_manager
+        
+        # Check if db_manager has a usable method
+        if hasattr(db_manager, 'engine'):
+            # Create session directly from engine
+            async with AsyncSession(db_manager.engine) as session:
+                try:
+                    yield session
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+        else:
+            # Fallback to independent session
+            async with get_db_session_directly() as session:
+                yield session
+                
+    except Exception as e:
+        logger.warning(f"Could not use existing db_manager: {str(e)}, using independent session")
+        # Final fallback
+        async with get_db_session_directly() as session:
+            yield session

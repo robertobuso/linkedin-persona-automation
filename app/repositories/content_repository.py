@@ -320,15 +320,18 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         user_id: Optional[UUID] = None,
         min_score: int = 70,
         limit: int = 20,
-        offset: int = 0 
+        offset: int = 0,
+        sort_by: str = "newest"  # NEW: Add sort option
     ) -> List[ContentItem]:
         """
-        Get content items with high relevance scores.
+        FIXED: Get content items with high relevance scores, sorted by creation date (newest first).
         
         Args:
             user_id: Optional user ID to filter by source ownership
             min_score: Minimum relevance score
             limit: Maximum number of items
+            offset: Number of items to skip
+            sort_by: Sort order - "newest", "relevance", or "mixed"
             
         Returns:
             List of high-relevance ContentItem instances
@@ -345,10 +348,17 @@ class ContentItemRepository(BaseRepository[ContentItem]):
                         ContentItem.status == ContentStatus.PROCESSED
                     )
                 )
-                .order_by(ContentItem.relevance_score.desc(), ContentItem.created_at.desc())
-                .offset(offset)  # FIX: Apply offset
-                .limit(limit)
             )
+            
+            # FIXED: Choose sort order based on parameter
+            if sort_by == "newest":
+                stmt = stmt.order_by(ContentItem.created_at.desc())
+            elif sort_by == "relevance":
+                stmt = stmt.order_by(ContentItem.relevance_score.desc(), ContentItem.created_at.desc())
+            else:  # mixed - balance relevance and recency
+                stmt = stmt.order_by(ContentItem.relevance_score.desc(), ContentItem.created_at.desc())
+            
+            stmt = stmt.offset(offset).limit(limit)
             
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
@@ -357,6 +367,90 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             logger.error(f"Failed to get high relevance items: {str(e)}")
             raise
 
+    async def get_llm_selected_content(
+        self,
+        user_id: UUID,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[ContentItem]:
+        """
+        NEW: Get content items that were selected by LLM for this user.
+        This addresses Issue #7 - making Smart Selection results visible.
+        
+        Args:
+            user_id: User ID to get selected content for
+            limit: Maximum number of items
+            offset: Number of items to skip
+            
+        Returns:
+            List of LLM-selected ContentItem instances
+        """
+        try:
+            # Get content items that have LLM selection metadata
+            stmt = (
+                select(ContentItem)
+                .join(ContentSource)
+                .where(
+                    and_(
+                        ContentSource.user_id == user_id,
+                        ContentItem.ai_analysis.is_not(None),
+                        ContentItem.ai_analysis.op('->>')('selection_reason').is_not(None),
+                        ContentItem.status == ContentStatus.PROCESSED
+                    )
+                )
+                .order_by(ContentItem.created_at.desc())  # Newest first
+                .offset(offset)
+                .limit(limit)
+            )
+            
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to get LLM selected content: {str(e)}")
+            return []
+
+    async def mark_content_as_llm_selected(
+        self,
+        content_item_ids: List[UUID],
+        selection_metadata: Dict[str, Any]
+    ) -> int:
+        """
+        NEW: Mark content items as selected by LLM for visibility.
+        
+        Args:
+            content_item_ids: List of content item IDs to mark
+            selection_metadata: Metadata about the selection
+            
+        Returns:
+            Number of items successfully marked
+        """
+        try:
+            marked_count = 0
+            
+            for item_id in content_item_ids:
+                item = await self.get_by_id(item_id)
+                if item:
+                    # Update AI analysis with selection metadata
+                    current_analysis = item.ai_analysis or {}
+                    current_analysis.update({
+                        "llm_selected": True,
+                        "selection_timestamp": datetime.utcnow().isoformat(),
+                        "selection_metadata": selection_metadata
+                    })
+                    
+                    await self.update_processing_status(
+                        item_id,
+                        ContentStatus.PROCESSED,
+                        ai_analysis=current_analysis
+                    )
+                    marked_count += 1
+            
+            return marked_count
+            
+        except Exception as e:
+            logger.error(f"Failed to mark content as LLM selected: {str(e)}")
+            return 0
 
 class PostDraftRepository(BaseRepository[PostDraft]):
     """Repository for PostDraft model with draft management and scheduling operations."""

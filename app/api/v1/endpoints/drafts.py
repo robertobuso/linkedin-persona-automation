@@ -32,6 +32,7 @@ from app.models.user import User
 from app.models.content import DraftStatus # Ensure this Enum is defined
 from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
 from app.services.linkedin_api_service import LinkedInAPIService
+from app.services.linkedin_oauth_service import LinkedInOAuthService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -236,7 +237,8 @@ async def publish_draft(
                     )
             else:
                 # Publish immediately to LinkedIn
-                linkedin_service = LinkedInAPIService(session)
+                oauth_service = LinkedInOAuthService()
+                linkedin_service = LinkedInAPIService(session, oauth_service)
                 
                 try:
                     # Create LinkedIn post

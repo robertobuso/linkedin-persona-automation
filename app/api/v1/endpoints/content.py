@@ -1,8 +1,11 @@
 """
-Content management endpoints for LinkedIn Presence Automation Application.
+Fixed content endpoints with proper async session management and error handling.
 
-Provides endpoints for managing content sources, viewing content feed,
-and triggering content ingestion processes.
+Key fixes:
+- Proper background task session management
+- Better error handling for database operations
+- Safe async context handling
+- Proper transaction boundaries
 """
 
 from app.services.enhanced_content_ingestion import EnhancedContentIngestionService
@@ -10,33 +13,31 @@ import redis.asyncio as redis
 import os
 import asyncio
 from typing import Any, List, Optional
-from uuid import UUID # Import UUID
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging # For logging in background task
+from sqlalchemy.exc import SQLAlchemyError
+import logging
 
-# Assuming your logger is configured in main.py or elsewhere
 logger = logging.getLogger(__name__)
 
-from app.core.security import get_current_active_user # Make sure this dependency is correctly defined and working
-from app.database.connection import get_db_session, db_manager, AsyncSessionContextManager # This is your @asynccontextmanager decorated dependency
+from app.core.security import get_current_active_user
+from app.database.connection import get_db_session, db_manager, AsyncSessionContextManager
 from app.repositories.content_repository import ContentSourceRepository, ContentItemRepository
-from app.services.content_ingestion import ContentIngestionService # Ensure this service is correctly implemented
-from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined
+from app.repositories.base import DuplicateError, DataValidationError, ConnectionError as DBConnectionError
+from app.services.content_ingestion import ContentIngestionService
+from app.schemas.api_schemas import (
     ContentSourceCreate,
     ContentSourceResponse,
     ContentSourceUpdate,
-    ContentItemResponse, # Assuming this is the ORM compatible one
+    ContentItemResponse,
     ContentIngestionResponse,
     FeedValidationRequest,
     FeedValidationResponse,
     ContentStatsResponse,
-    PaginatedResponse # If you have a generic paginated response schema
 )
-# from app.schemas.content_schemas import ProcessingResultSchema # This was in your original, ensure path is correct
-from app.tasks.content_tasks import process_source_task # For Celery task
 from app.models.user import User
-from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
+from app.utils.exceptions import ContentNotFoundError, ValidationError
 
 router = APIRouter()
 
@@ -47,23 +48,81 @@ try:
 except Exception as e:
     logger.warning(f"Redis connection failed: {str(e)}. Caching will be disabled.")
 
-# Helper function for background source processing (if not using Celery for this specific one)
+
 async def _process_source_background(source_id_str: str):
-    """Background task with proper session management."""
+    """
+    Background task with proper session management and error handling.
+    
+    Fixed to use proper background session management.
+    """
     logger.info(f"Background task started for source_id: {source_id_str}")
     
-    # Use the database manager's context manager for background tasks
-    async with db_manager.get_session_directly() as session:
-        try:
-            ingestion_service = ContentIngestionService(session)
-            source_uuid = UUID(source_id_str)
-            result = await ingestion_service.process_source_by_id(source_uuid)
-            logger.info(f"Background processing completed for source {source_id_str}")
-        except Exception as e:
-            logger.error(f"Background processing failed for source {source_id_str}: {str(e)}", exc_info=True)
-            raise
-        finally:
-            await session.close() # Always close the session
+    try:
+        # Import the fixed background session helper
+        from app.database.connection import get_db_session_from_existing
+        
+        async with get_db_session_from_existing() as session:
+            try:
+                # Create ingestion service with the new session
+                ingestion_service = ContentIngestionService(session)
+                source_uuid = UUID(source_id_str)
+                
+                # Process the source
+                result = await ingestion_service.process_source_by_id(source_uuid)
+                
+                logger.info(
+                    f"Background processing completed for source {source_id_str}: "
+                    f"{result.processed_count} items processed, {result.error_count} errors"
+                )
+                
+            except Exception as e:
+                logger.error(f"Background processing failed for source {source_id_str}: {str(e)}")
+                raise
+                
+    except Exception as e:
+        logger.error(f"Critical error in background task for source {source_id_str}: {str(e)}", exc_info=True)
+
+
+async def _trigger_deep_analysis(user_id: UUID, selected_articles: List[dict[str, Any]]):
+    """
+    Background task to trigger deep analysis for selected articles.
+    
+    Fixed to use proper background session management.
+    """
+    logger.info(f"Starting deep analysis for {len(selected_articles)} articles for user {user_id}")
+    
+    try:
+        # Import the fixed background session helper
+        from app.database.connection import get_db_session_from_existing
+        
+        async with get_db_session_from_existing() as session:
+            try:
+                from app.services.deep_content_analysis import DeepContentAnalysisService
+                
+                analysis_service = DeepContentAnalysisService(session)
+                
+                # Analyze each selected article
+                for article_data in selected_articles:
+                    try:
+                        await analysis_service.batch_analyze_selected_content(
+                            user_id=user_id,
+                            selected_articles=[article_data]
+                        )
+                        
+                        # Add small delay to avoid overwhelming the system
+                        await asyncio.sleep(0.5)
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to analyze article {article_data.get('title', 'Unknown')}: {str(e)}")
+                        continue
+                        
+                logger.info(f"Deep analysis completed for user {user_id}")
+                
+            except Exception as e:
+                logger.error(f"Deep analysis failed: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"Critical error in deep analysis background task: {str(e)}", exc_info=True)
 
 
 @router.get("/sources", response_model=List[ContentSourceResponse])
@@ -73,9 +132,16 @@ async def get_content_sources(
 ) -> List[ContentSourceResponse]:
     """Get user's content sources."""
     async with db_session_cm as session:
-        source_repo = ContentSourceRepository(session)
-        sources = await source_repo.get_active_sources_by_user(current_user.id)
-        return [ContentSourceResponse.model_validate(source) for source in sources] # Use model_validate for Pydantic v2
+        try:
+            source_repo = ContentSourceRepository(session)
+            sources = await source_repo.get_active_sources_by_user(current_user.id)
+            return [ContentSourceResponse.model_validate(source) for source in sources]
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting sources for user {current_user.id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve content sources"
+            )
 
 
 @router.post("/sources", response_model=ContentSourceResponse, status_code=status.HTTP_201_CREATED)
@@ -83,11 +149,12 @@ async def create_content_source(
     source_data: ContentSourceCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Injected context manager
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentSourceResponse:
-    source_object = None # To hold the created source for returning
-    try:
-        async with db_session_cm as session:
+    """Create a new content source with proper error handling."""
+    async with db_session_cm as session:
+        try:
+            # Validate RSS feed first
             from app.services.rss_parser import RSSParser
             rss_parser = RSSParser()
 
@@ -98,139 +165,306 @@ async def create_content_source(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid feed URL: {test_result.get('error', 'Unknown validation error')}"
                     )
-            except Exception as ve: # Catch potential errors from validate_feed_url
+            except Exception as ve:
                 raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Feed URL validation failed: {str(ve)}"
-                    )
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Feed URL validation failed: {str(ve)}"
+                )
 
+            # Create the source
             source_repo = ContentSourceRepository(session)
             source_dict = source_data.model_dump()
             source_dict["user_id"] = current_user.id
             source_dict["url"] = str(source_data.url) if source_data.url else None
             
-            source_object = await source_repo.create(**source_dict) # Create the source
+            source_object = await source_repo.create(**source_dict)
             
-            # The commit will happen when the 'async with' block exits successfully
-            # OR when get_db_session's try block finishes successfully.
-
-            # If we are here, the session commit (from get_db_session) should have happened.
-            # Schedule background task *after* successful commit of the source.
+            # Commit the transaction
+            await session.commit()
+            
+            # Schedule background task after successful commit
             if source_object:
                 background_tasks.add_task(_process_source_background, str(source_object.id))
                 return ContentSourceResponse.model_validate(source_object)
             else:
-                # This case should ideally not be reached if create raises an error on failure
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to create content source, object not returned."
+                    detail="Failed to create content source"
                 )
 
-    except HTTPException: # Re-raise HTTPExceptions
-        raise
-    except ValueError as ve: # Catch specific validation errors from Pydantic or your logic
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except DuplicateError as de: # If your repo raises this
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(de))
-    except Exception as e:
-        logger.error(f"Failed to create content source: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create content source: {str(e)}"
-        )
+        except HTTPException:
+            raise
+        except DuplicateError as de:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(de))
+        except DataValidationError as ve:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+        except DBConnectionError as ce:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(ce))
+        except SQLAlchemyError as e:
+            logger.error(f"Database error creating content source: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error creating content source"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating content source: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred"
+            )
 
 
 @router.get("/sources/{source_id}", response_model=ContentSourceResponse)
 async def get_content_source(
-    source_id: UUID, # Changed to UUID
+    source_id: UUID,
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentSourceResponse:
     """Get a specific content source."""
     async with db_session_cm as session:
-        source_repo = ContentSourceRepository(session)
-        source = await source_repo.get_by_id(source_id)
+        try:
+            source_repo = ContentSourceRepository(session)
+            source = await source_repo.get_by_id(source_id)
 
-        if not source:
-            raise ContentNotFoundError(f"Content source {source_id} not found")
+            if not source:
+                raise ContentNotFoundError(f"Content source {source_id} not found")
 
-        if source.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+            if source.user_id != current_user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-        return ContentSourceResponse.model_validate(source)
+            return ContentSourceResponse.model_validate(source)
+            
+        except ContentNotFoundError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content source not found")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting source {source_id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error retrieving content source"
+            )
 
 
 @router.put("/sources/{source_id}", response_model=ContentSourceResponse)
 async def update_content_source(
-    source_id: UUID, # Changed to UUID
+    source_id: UUID,
     source_update: ContentSourceUpdate,
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentSourceResponse:
     """Update a content source."""
     async with db_session_cm as session:
-        source_repo = ContentSourceRepository(session)
-        source = await source_repo.get_by_id(source_id)
-
-        if not source:
-            raise ContentNotFoundError(f"Content source {source_id} not found")
-
-        if source.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
-        update_data = source_update.model_dump(exclude_unset=True)
-
         try:
-            # BaseRepository update method expects id and kwargs
+            source_repo = ContentSourceRepository(session)
+            source = await source_repo.get_by_id(source_id)
+
+            if not source:
+                raise ContentNotFoundError(f"Content source {source_id} not found")
+
+            if source.user_id != current_user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+            update_data = source_update.model_dump(exclude_unset=True)
+            
             updated_source = await source_repo.update(id=source_id, **update_data)
-            if not updated_source: # Should not happen if source was found initially
-                 raise ContentNotFoundError(f"Content source {source_id} not found during update")
+            
+            if not updated_source:
+                raise ContentNotFoundError(f"Content source {source_id} not found during update")
+            
+            await session.commit()
             return ContentSourceResponse.model_validate(updated_source)
-        except Exception as e:
-            logger.error(f"Failed to update content source {source_id}: {e}", exc_info=True)
+            
+        except ContentNotFoundError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content source not found")
+        except DuplicateError as de:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(de))
+        except DataValidationError as ve:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+        except SQLAlchemyError as e:
+            logger.error(f"Database error updating source {source_id}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update content source: {str(e)}"
+                detail="Database error updating content source"
             )
 
 
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_content_source(
-    source_id: UUID, # Changed to UUID
+    source_id: UUID,
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> Response:
     """Delete a content source."""
     async with db_session_cm as session:
-        source_repo = ContentSourceRepository(session)
-        source = await source_repo.get_by_id(source_id)
-
-        if not source:
-            raise ContentNotFoundError(f"Content source {source_id} not found")
-
-        if source.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
         try:
-            # Assuming BaseRepository.delete takes id and returns bool
+            source_repo = ContentSourceRepository(session)
+            source = await source_repo.get_by_id(source_id)
+
+            if not source:
+                raise ContentNotFoundError(f"Content source {source_id} not found")
+
+            if source.user_id != current_user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
             deleted = await source_repo.delete(id=source_id)
-            if not deleted:
-                # This case might indicate the source was already deleted by another request,
-                # or an issue with the delete method not finding it.
-                # Returning 204 is still acceptable if the end state is "not found".
-                logger.warning(f"Attempted to delete source {source_id}, but it was not found or delete failed.")
+            
+            if deleted:
+                await session.commit()
+            else:
+                logger.warning(f"Attempted to delete source {source_id}, but it was not found")
+            
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-        except Exception as e:
-            logger.error(f"Failed to delete content source {source_id}: {e}", exc_info=True)
+            
+        except ContentNotFoundError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content source not found")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting source {source_id}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete content source: {str(e)}"
+                detail="Database error deleting content source"
             )
 
 
-@router.get("/feed", response_model=List[ContentItemResponse]) # Assuming ContentItemResponse is ORM compatible
+@router.get("/debug/sources", response_model=dict[str, Any])
+async def debug_content_sources(
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict[str, Any]:
+    """
+    Debug endpoint to check content sources and their processing status.
+    
+    This helps troubleshoot why some sources might not be processed.
+    """
+    async with db_session_cm as session:
+        try:
+            source_repo = ContentSourceRepository(session)
+            
+            # Get all sources for user
+            all_sources = await source_repo.find_by(user_id=current_user.id)
+            active_sources = await source_repo.get_active_sources_by_user(current_user.id)
+            
+            source_details = []
+            
+            for source in all_sources:
+                details = {
+                    "id": str(source.id),
+                    "name": source.name,
+                    "source_type": source.source_type,
+                    "url": source.url,
+                    "is_active": source.is_active,
+                    "last_checked_at": source.last_checked_at.isoformat() if source.last_checked_at else None,
+                    "last_successful_check_at": source.last_successful_check_at.isoformat() if source.last_successful_check_at else None,
+                    "total_items_found": source.total_items_found,
+                    "total_items_processed": source.total_items_processed,
+                    "consecutive_failures": source.consecutive_failures,
+                    "last_error_message": source.last_error_message,
+                    "content_filters": source.content_filters,
+                }
+                
+                # Test RSS feed if it's an RSS source
+                if source.source_type == "rss_feed" and source.url:
+                    try:
+                        from app.services.rss_parser import RSSParser
+                        rss_parser = RSSParser()
+                        test_result = await rss_parser.validate_feed_url(source.url)
+                        details["feed_validation"] = test_result
+                        
+                        if test_result.get("valid"):
+                            # Try to get a few items
+                            items = await rss_parser.parse_feed(source.url)
+                            details["current_feed_items"] = len(items)
+                            details["sample_titles"] = [item.title for item in items[:3]]
+                        
+                    except Exception as e:
+                        details["feed_validation"] = {
+                            "valid": False,
+                            "error": str(e)
+                        }
+                
+                source_details.append(details)
+            
+            return {
+                "user_id": str(current_user.id),
+                "total_sources": len(all_sources),
+                "active_sources": len(active_sources),
+                "inactive_sources": len(all_sources) - len(active_sources),
+                "sources": source_details,
+                "debug_timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Debug sources endpoint failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Debug endpoint failed: {str(e)}"
+            )
+
+
+@router.post("/debug/test-ingestion", response_model=dict[str, Any])
+async def debug_test_ingestion(
+    source_id: Optional[UUID] = Query(None, description="Test specific source"),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict[str, Any]:
+    """
+    Debug endpoint to test content ingestion for troubleshooting.
+    """
+    async with db_session_cm as session:
+        try:
+            enhanced_service = EnhancedContentIngestionService(session, redis_client)
+            
+            if source_id:
+                # Test specific source
+                source_repo = ContentSourceRepository(session)
+                source = await source_repo.get_by_id(source_id)
+                
+                if not source or source.user_id != current_user.id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
+                
+                # Test gathering candidates from this source
+                candidates = await enhanced_service._gather_candidate_articles([source], current_user, None)
+                
+                return {
+                    "source_id": str(source_id),
+                    "source_name": source.name,
+                    "source_type": source.source_type,
+                    "candidates_found": len(candidates),
+                    "candidate_titles": [c.title for c in candidates[:5]],
+                    "test_timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                # Test all sources
+                sources = await enhanced_service.source_repo.get_active_sources_by_user(current_user.id)
+                user_preferences = await enhanced_service.preferences_repo.get_active_preferences_for_user(current_user.id)
+                
+                candidates = await enhanced_service._gather_candidate_articles(sources, current_user, user_preferences)
+                
+                # Group by source
+                by_source = {}
+                for candidate in candidates:
+                    source_name = candidate.source_name
+                    if source_name not in by_source:
+                        by_source[source_name] = []
+                    by_source[source_name].append(candidate.title)
+                
+                return {
+                    "total_sources": len(sources),
+                    "total_candidates": len(candidates),
+                    "candidates_by_source": {k: len(v) for k, v in by_source.items()},
+                    "sample_titles_by_source": {k: v[:3] for k, v in by_source.items()},
+                    "test_timestamp": datetime.utcnow().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"Debug test ingestion failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Test ingestion failed: {str(e)}"
+            )
+
+
+@router.get("/feed", response_model=List[ContentItemResponse])
 async def get_content_feed(
-    source_id: Optional[UUID] = Query(None, description="Filter by source ID"), # Changed to UUID
+    source_id: Optional[UUID] = Query(None, description="Filter by source ID"),
     limit: int = Query(20, ge=1, le=100, description="Number of items to return"),
     offset: int = Query(0, ge=0, description="Number of items to skip"),
     current_user: User = Depends(get_current_active_user),
@@ -238,32 +472,35 @@ async def get_content_feed(
 ) -> List[ContentItemResponse]:
     """Get content feed for user."""
     async with db_session_cm as session:
-        content_repo = ContentItemRepository(session)
-        items: List[Any] # Define items here for broader scope
+        try:
+            content_repo = ContentItemRepository(session)
 
-        if source_id:
-            source_repo = ContentSourceRepository(session)
-            source = await source_repo.get_by_id(source_id)
+            if source_id:
+                source_repo = ContentSourceRepository(session)
+                source = await source_repo.get_by_id(source_id)
 
-            if not source or source.user_id != current_user.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
+                if not source or source.user_id != current_user.id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
 
-            items = await content_repo.get_items_by_source(
-                source_id=source_id,
-                limit=limit,
-                offset=offset
+                items = await content_repo.get_items_by_source(
+                    source_id=source_id,
+                    limit=limit,
+                    offset=offset
+                )
+            else:
+                items = await content_repo.get_high_relevance_items(
+                    user_id=current_user.id,
+                    limit=limit
+                )
+
+            return [ContentItemResponse.model_validate(item) for item in items]
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting content feed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error retrieving content feed"
             )
-        else:
-            # Assuming get_high_relevance_items takes user_id, limit, offset
-            # Your previous ContentItemRepository didn't show offset for this method
-            # Add it if it's there or adjust.
-            items = await content_repo.get_high_relevance_items(
-                user_id=current_user.id,
-                limit=limit
-                # offset=offset # Add if your repository method supports it
-            )
-
-        return [ContentItemResponse.model_validate(item) for item in items]
 
 
 @router.post("/trigger-ingestion", response_model=ContentIngestionResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -274,27 +511,26 @@ async def trigger_content_ingestion(
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> ContentIngestionResponse:
-    """Trigger enhanced content ingestion with LLM selection."""
+    """Trigger enhanced content ingestion with proper error handling."""
     
     async with db_session_cm as session:
         try:
-            # Use enhanced ingestion service instead of basic one
+            # Use enhanced ingestion service
             enhanced_service = EnhancedContentIngestionService(session, redis_client)
             
             if source_id:
-                # Process specific source (keep existing logic)
+                # Process specific source
                 source_repo = ContentSourceRepository(session)
                 source = await source_repo.get_by_id(source_id)
                 
                 if not source or source.user_id != current_user.id:
                     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to source")
                 
-                # For now, use Celery task for source-specific processing
-                from app.tasks.content_tasks import process_source_task
-                task = process_source_task.delay(str(source_id))
+                # Use background task for source-specific processing
+                background_tasks.add_task(_process_source_background, str(source_id))
                 
                 return ContentIngestionResponse(
-                    task_id=task.id,
+                    task_id=None,  # No Celery task ID for background tasks
                     status="accepted",
                     message=f"Content ingestion started for source {source_id}"
                 )
@@ -308,7 +544,10 @@ async def trigger_content_ingestion(
                     force_refresh=force_refresh
                 )
                 
-                # Trigger deep analysis for selected articles
+                # Commit the selection results
+                await session.commit()
+                
+                # Trigger deep analysis for selected articles in background
                 if selection_result.selected_articles:
                     background_tasks.add_task(
                         _trigger_deep_analysis,
@@ -317,61 +556,34 @@ async def trigger_content_ingestion(
                     )
                 
                 return ContentIngestionResponse(
-                    task_id=None,  # No Celery task for LLM selection
+                    task_id=None,
                     status="completed",
                     message=f"Enhanced content ingestion completed: {len(selection_result.selected_articles)} articles selected"
                 )
                 
+        except HTTPException:
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in content ingestion: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error during content ingestion"
+            )
         except Exception as e:
-            logger.error(f"Enhanced content ingestion failed: {str(e)}")
+            logger.error(f"Enhanced content ingestion failed: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Content ingestion failed: {str(e)}"
             )
 
-async def _trigger_deep_analysis(user_id: UUID, selected_articles: List[dict[str, Any]]):
-    """Background task to trigger deep analysis for selected articles."""
-    try:
-        logger.info(f"Starting deep analysis for {len(selected_articles)} articles for user {user_id}")
-        
-        from app.database.connection import get_db_session
-        async with get_db_session() as session:
-            from app.services.deep_content_analysis import DeepContentAnalysisService
-            
-            analysis_service = DeepContentAnalysisService(session)
-            
-            # Analyze each selected article
-            for article_data in selected_articles:
-                try:
-                    await analysis_service.batch_analyze_selected_content(
-                        user_id=user_id,
-                        selected_articles=[article_data]
-                    )
-                    
-                    # Add small delay to avoid overwhelming the system
-                    await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to analyze article {article_data.get('title', 'Unknown')}: {str(e)}")
-                    continue
-                    
-        logger.info(f"Deep analysis completed for user {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Deep analysis background task failed: {str(e)}")
 
-# Add new endpoint for LLM content selection
 @router.post("/select-content", response_model=dict[str, Any])
 async def select_relevant_content(
     force_refresh: bool = Query(False, description="Force new selection, bypassing cache"),
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> dict[str, Any]:
-    """
-    Select relevant content for user using LLM-based selection.
-    
-    This endpoint implements Phase 2 of the content discovery pipeline.
-    """
+    """Select relevant content for user using LLM-based selection."""
     async with db_session_cm as session:
         try:
             enhanced_service = EnhancedContentIngestionService(session, redis_client)
@@ -380,6 +592,9 @@ async def select_relevant_content(
                 current_user.id,
                 force_refresh=force_refresh
             )
+            
+            # Commit any database changes
+            await session.commit()
             
             return {
                 "selected_articles": selection_result.selected_articles,
@@ -391,26 +606,32 @@ async def select_relevant_content(
                 }
             }
             
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in content selection: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error during content selection"
+            )
         except Exception as e:
-            logger.error(f"Content selection failed: {str(e)}")
+            logger.error(f"Content selection failed: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Content selection failed: {str(e)}"
             )
-        
+
 
 @router.post("/validate-feed", response_model=FeedValidationResponse)
-async def validate_feed_url_endpoint( # Renamed to avoid conflict with any imported validate_feed_url
+async def validate_feed_url_endpoint(
     validation_request: FeedValidationRequest,
-    # current_user: User = Depends(get_current_active_user) # Auth might not be needed for a generic validator
 ) -> FeedValidationResponse:
     """Validate RSS feed URL."""
-    # Assuming RSSParser is okay to instantiate without a db session for this utility
-    from app.services.rss_parser import RSSParser
-    rss_parser = RSSParser()
     try:
+        from app.services.rss_parser import RSSParser
+        rss_parser = RSSParser()
+        
         validation_result = await rss_parser.validate_feed_url(str(validation_request.url))
         return FeedValidationResponse(**validation_result)
+        
     except Exception as e:
         logger.error(f"Feed validation endpoint failed: {e}", exc_info=True)
         return FeedValidationResponse(
@@ -440,6 +661,12 @@ async def get_content_stats(
                 stats = await ingestion_service.get_processing_stats(current_user.id)
                 return stats
             
+        except SQLAlchemyError as e:
+            logger.error(f"Database error getting content stats: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error retrieving content statistics"
+            )
         except Exception as e:
             logger.error(f"Failed to get enhanced content stats: {str(e)}")
             raise HTTPException(

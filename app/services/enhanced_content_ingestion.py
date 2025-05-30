@@ -1,17 +1,15 @@
 """
-Enhanced content ingestion service with LLM-based content selection and user preference filtering.
+Complete enhanced content ingestion service with robust JSON parsing.
 
-Implements Phase 1 and Phase 2 of the LLM-first content discovery pipeline:
-- Removes hardcoded AI filters
-- Adds user preference-based filtering
-- Implements LLM-based content selection
-- Adds Redis caching for selection results
+This includes all the JSON parsing functions integrated into the service.
+Replace your existing enhanced_content_ingestion.py with this version.
 """
 
 import asyncio
 import re
 import json
 import logging
+import tempfile
 from typing import List, Dict, Any, Optional, Tuple
 from uuid import UUID
 from datetime import datetime, timedelta
@@ -73,15 +71,136 @@ class ArticleCandidate:
         }
 
 
+def clean_and_repair_json(json_text: str) -> str:
+    """
+    Clean and attempt to repair common JSON formatting issues from LLM responses.
+    
+    Args:
+        json_text: Raw JSON text from LLM
+        
+    Returns:
+        Cleaned JSON text
+    """
+    # Remove markdown code blocks
+    json_text = re.sub(r'^```(?:json)?\s*', '', json_text.strip())
+    json_text = re.sub(r'\s*```$', '', json_text.strip())
+    
+    # Remove any text before the first { or [
+    match = re.search(r'[{\[]', json_text)
+    if match:
+        json_text = json_text[match.start():]
+    
+    # Remove any text after the last } or ]
+    last_brace = json_text.rfind('}')
+    last_bracket = json_text.rfind(']')
+    last_pos = max(last_brace, last_bracket)
+    
+    if last_pos != -1:
+        json_text = json_text[:last_pos + 1]
+    
+    # Fix common issues
+    # Remove trailing commas before closing braces/brackets
+    json_text = re.sub(r',\s*([}\]])', r'\1', json_text)
+    
+    return json_text.strip()
+
+
+def extract_json_from_response(response_text: str) -> Dict[str, Any]:
+    """
+    Extract and parse JSON from LLM response with multiple fallback strategies.
+    
+    Args:
+        response_text: Raw response from LLM
+        
+    Returns:
+        Parsed JSON dictionary
+    """
+    logger.debug(f"Attempting to parse JSON from response of length {len(response_text)}")
+    
+    # Strategy 1: Find JSON using regex with greedy matching
+    json_patterns = [
+        r'\{[\s\S]*\}',  # Match from first { to last }
+        r'\[[\s\S]*\]',  # Match from first [ to last ]
+    ]
+    
+    for pattern in json_patterns:
+        matches = re.findall(pattern, response_text)
+        for match in matches:
+            try:
+                cleaned = clean_and_repair_json(match)
+                return json.loads(cleaned)
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parse failed for pattern {pattern}: {str(e)}")
+                continue
+    
+    # Strategy 2: Try to find the JSON block more intelligently
+    try:
+        start_idx = response_text.find('{')
+        if start_idx != -1:
+            brace_count = 0
+            end_idx = start_idx
+            
+            for i, char in enumerate(response_text[start_idx:], start_idx):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if brace_count == 0:  # Found balanced braces
+                json_candidate = response_text[start_idx:end_idx]
+                cleaned = clean_and_repair_json(json_candidate)
+                return json.loads(cleaned)
+                
+    except json.JSONDecodeError as e:
+        logger.warning(f"Balanced brace strategy failed: {str(e)}")
+    
+    # Strategy 3: Try to extract just the selections array
+    try:
+        # Look for "selections": [...]
+        array_match = re.search(r'"selections":\s*\[([\s\S]*?)\](?:\s*,|\s*})', response_text)
+        if array_match:
+            selections_json = f'{{"selections": [{array_match.group(1)}]}}'
+            cleaned = clean_and_repair_json(selections_json)
+            return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        logger.warning(f"Array extraction strategy failed: {str(e)}")
+    
+    # Strategy 4: Manual parsing for critical data
+    try:
+        selections = []
+        
+        # Extract individual selection objects with index-based format
+        selection_pattern = r'\{\s*"index":\s*(\d+)\s*,\s*"score":\s*([0-9.]+)\s*,\s*"reason":\s*"([^"]*)"[^}]*\}'
+        
+        for match in re.finditer(selection_pattern, response_text):
+            try:
+                selection = {
+                    "index": int(match.group(1)),
+                    "score": float(match.group(2)),
+                    "reason": match.group(3)
+                }
+                selections.append(selection)
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Failed to parse individual selection: {str(e)}")
+                continue
+        
+        if selections:
+            logger.info(f"Manually extracted {len(selections)} selections from malformed JSON")
+            return {"selections": selections}
+            
+    except Exception as e:
+        logger.warning(f"Manual parsing strategy failed: {str(e)}")
+    
+    # If all strategies fail, raise an exception
+    raise json.JSONDecodeError(f"Could not parse JSON from LLM response after trying multiple strategies", response_text, 0)
+
+
 class EnhancedContentIngestionService:
     """
-    Enhanced content ingestion service with LLM-based selection and user preferences.
-    
-    Implements intelligent content discovery that:
-    1. Filters content based on user preferences (Phase 1)
-    2. Uses LLM to select most relevant articles (Phase 2) 
-    3. Caches selection results in Redis
-    4. Tracks selection performance
+    Enhanced content ingestion service with robust LLM-based selection and JSON parsing.
     """
     
     def __init__(self, session: AsyncSession, redis_client: Optional[redis.Redis] = None):
@@ -114,20 +233,6 @@ class EnhancedContentIngestionService:
     ) -> ContentSelectionResult:
         """
         Process content for a user using LLM-based selection.
-        
-        This implements Phase 2 of the pipeline:
-        1. Check Redis cache for recent selections
-        2. Gather candidate articles from all user sources
-        3. Apply basic user preference filtering
-        4. Use LLM to select most relevant articles
-        5. Cache results in Redis
-        
-        Args:
-            user_id: User ID to process content for
-            force_refresh: Whether to bypass cache and force new selection
-            
-        Returns:
-            ContentSelectionResult with selected articles and metadata
         """
         try:
             logger.info(f"Processing content with LLM selection for user {user_id}")
@@ -142,7 +247,7 @@ class EnhancedContentIngestionService:
             # Get user and preferences
             stmt = (
                 select(User)
-                .options(selectinload(User.content_preferences_records)) # Eagerly load the relationship
+                .options(selectinload(User.content_preferences_records))
                 .where(User.id == user_id)
             )
             result = await self.session.execute(stmt)
@@ -188,18 +293,23 @@ class EnhancedContentIngestionService:
     async def _gather_candidate_articles(
         self, 
         sources: List[ContentSource], 
-        user: User, # Still useful for context if needed, or for duplicate checking
-        user_preferences: Optional[UserContentPreferences] # Potentially not used for filtering here anymore
+        user: User,
+        user_preferences: Optional[UserContentPreferences]
     ) -> List[ArticleCandidate]:
         """
-        Gather candidate articles from all user sources.
-        LLM will do the primary filtering/selection.
+        Gather candidate articles from ALL user sources.
+        Fixed to process all sources and then limit candidates.
         """
-        candidates = []
+        all_candidates = []
+        articles_per_source = max(1, self.max_articles_for_llm // len(sources)) if sources else 50
+        
+        logger.info(f"Processing {len(sources)} sources, targeting ~{articles_per_source} articles per source")
         
         for source in sources:
+            source_candidates = []
+            
             try:
-                logger.debug(f"Gathering candidates from source: {source.name} for LLM selection.")
+                logger.info(f"Gathering candidates from source: {source.name} ({source.source_type})")
                 
                 if source.source_type == "rss_feed":
                     items = await self.rss_parser.parse_feed(source.url)
@@ -209,49 +319,84 @@ class EnhancedContentIngestionService:
                     logger.warning(f"Unsupported source type: {source.source_type}")
                     continue
                 
+                logger.info(f"Found {len(items)} items from {source.name}")
+                
                 for item in items:
                     try:
-                        # Create metadata (still useful for ArticleCandidate)
-                        content_age_hours = 0
-                        if item.published_at:
-                            age_delta = datetime.utcnow() - item.published_at
-                            content_age_hours = age_delta.total_seconds() / 3600
-                        
-                        word_count = len(item.content.split()) if item.content else 0
-
-                        # Duplicate checking can still be useful
+                        # Duplicate checking
                         if await self.content_repo.check_duplicate_url(item.url):
                             logger.debug(f"Skipping duplicate URL: {item.url}")
                             continue
                         
+                        # Create metadata
+                        word_count = len(item.content.split()) if item.content else 0
+
                         candidate = ArticleCandidate(
                             title=item.title,
                             url=item.url,
-                            content=item.content, # Full content is still gathered here
+                            content=item.content,
                             author=item.author,
                             published_at=item.published_at,
                             source_name=source.name,
                             source_id=source.id, 
-                            word_count=word_count # Store original word count
+                            word_count=word_count
                         )
-                        candidates.append(candidate)
+                        source_candidates.append(candidate)
                         
-                        if len(candidates) >= self.max_articles_for_llm: # Still limit total candidates sent to LLM
+                        # Limit per source to ensure fair distribution
+                        if len(source_candidates) >= articles_per_source:
+                            logger.info(f"Reached per-source limit of {articles_per_source} for {source.name}")
                             break
                             
                     except Exception as e:
                         logger.warning(f"Error processing item from {source.name}: {str(e)}")
                         continue
                 
-                if len(candidates) >= self.max_articles_for_llm:
-                    break
-                    
+                logger.info(f"Gathered {len(source_candidates)} candidates from {source.name}")
+                all_candidates.extend(source_candidates)
+                        
             except Exception as e:
                 logger.error(f"Error gathering candidates from source {source.name}: {str(e)}")
                 continue
         
-        logger.info(f"Gathered {len(candidates)} candidate articles for LLM selection.")
-        return candidates
+        # Now limit total candidates if needed
+        if len(all_candidates) > self.max_articles_for_llm:
+            logger.info(f"Limiting candidates from {len(all_candidates)} to {self.max_articles_for_llm}")
+            
+            # Try to maintain balanced distribution across sources
+            candidates_by_source = {}
+            for candidate in all_candidates:
+                source_name = candidate.source_name
+                if source_name not in candidates_by_source:
+                    candidates_by_source[source_name] = []
+                candidates_by_source[source_name].append(candidate)
+            
+            # Select proportionally from each source
+            final_candidates = []
+            sources_count = len(candidates_by_source)
+            candidates_per_source = self.max_articles_for_llm // sources_count
+            remaining_slots = self.max_articles_for_llm % sources_count
+            
+            for i, (source_name, source_candidates) in enumerate(candidates_by_source.items()):
+                # Give some sources one extra candidate if there are remaining slots
+                limit = candidates_per_source + (1 if i < remaining_slots else 0)
+                selected = source_candidates[:limit]
+                final_candidates.extend(selected)
+                logger.info(f"Selected {len(selected)} candidates from {source_name}")
+            
+            all_candidates = final_candidates
+        
+        logger.info(f"Final total: {len(all_candidates)} candidate articles for LLM selection")
+        
+        # Log source distribution
+        source_counts = {}
+        for candidate in all_candidates:
+            source_name = candidate.source_name
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
+        
+        logger.info(f"Source distribution: {source_counts}")
+        
+        return all_candidates
     
     async def _select_articles_with_llm(
         self,
@@ -260,18 +405,7 @@ class EnhancedContentIngestionService:
         user: User,
         user_preferences: Optional[UserContentPreferences]
     ) -> ContentSelectionResult:
-        """
-        Use LLM to select the most relevant articles from candidates.
-        
-        Args:
-            user_id: User ID
-            candidates: List of candidate articles
-            user: User object
-            user_preferences: User's content preferences
-            
-        Returns:
-            ContentSelectionResult with selected articles
-        """
+        """Use LLM to select the most relevant articles from candidates."""
         try:
             start_time = datetime.utcnow()
             
@@ -296,7 +430,7 @@ class EnhancedContentIngestionService:
                 selected_articles=selected_articles,
                 selection_reasons=selection_reasons,
                 processing_details={
-                    "llm_model": "gpt-4",  # This would come from the LLM service
+                    "llm_model": "gpt-4",
                     "candidates_evaluated": len(candidates),
                     "articles_selected": len(selected_articles),
                     "processing_time_seconds": processing_time,
@@ -344,7 +478,7 @@ class EnhancedContentIngestionService:
             return ". ".join(context_parts)
         else:
             # Fallback to legacy preferences
-            return user.get_interests_for_llm()
+            return getattr(user, 'get_interests_for_llm', lambda: "Professional interested in technology and business")()
     
     def _build_selection_prompt(
         self, 
@@ -352,55 +486,69 @@ class EnhancedContentIngestionService:
         user_context: str,
         user_preferences: Optional[UserContentPreferences]
     ) -> str:
-        """Build the LLM prompt for article selection."""
+        """Build a more robust LLM prompt for article selection with simplified JSON format."""
         max_articles = user_preferences.max_articles_per_day if user_preferences else 15
         target_articles = min(max_articles, len(candidates), 15)  # Cap at 15 for now
         
-        articles_json = json.dumps([candidate.to_dict() for candidate in candidates], indent=2)
+        # Create simplified candidate list for the prompt
+        simplified_candidates = []
+        for i, candidate in enumerate(candidates):
+            simplified_candidates.append({
+                "index": i,
+                "title": candidate.title,
+                "url": candidate.url[:100] + "..." if len(candidate.url) > 100 else candidate.url,
+                "author": candidate.author or "Unknown",
+                "source": candidate.source_name,
+                "word_count": candidate.word_count,
+                "content_preview": candidate.content[:200] + "..." if len(candidate.content) > 200 else candidate.content
+            })
         
-        prompt = f"""You are an expert content curator for LinkedIn professionals. Your task is to select the {target_articles} most relevant and valuable articles from the following candidates for a user with these preferences:
+        candidates_json = json.dumps(simplified_candidates, indent=2)
+        
+        prompt = f"""You are an expert content curator for LinkedIn professionals. Select the {target_articles} most relevant articles from the candidates below for a user with these preferences:
 
 USER CONTEXT:
 {user_context}
 
-CANDIDATE ARTICLES:
-{articles_json}
+CANDIDATES (Total: {len(candidates)}):
+{candidates_json}
 
 SELECTION CRITERIA:
-- Select exactly {target_articles} articles that would be most valuable for this user.
-- Prioritize articles that match the user's interests and professional context.
-- Consider content quality, relevance, and professional value.
-- Avoid duplicate or very similar topics.
-- Prefer recent, actionable content over old news.
+- Select exactly {target_articles} articles that would be most valuable for this user
+- Prioritize articles that match the user's interests and professional context
+- Consider content quality, relevance, and professional value
+- Avoid duplicate or very similar topics
+- Prefer recent, actionable content over old news
 
-RESPONSE FORMAT:
-Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it.
-The JSON object must have this exact structure:
+CRITICAL INSTRUCTIONS:
+1. Return ONLY valid JSON - no markdown, no explanations, no extra text
+2. Keep selection_reason under 50 characters to avoid JSON issues
+3. Use the article index numbers, not full URLs
+4. Double-check your JSON syntax before responding
+
+REQUIRED JSON FORMAT:
 {{
-    "selected_articles": [
+    "selections": [
         {{
-            "url": "article_url",
-            "title": "article_title", 
-            "relevance_score": 0.85,  // A float between 0.0 and 1.0
-            "selection_reason": "Brief explanation of why this article was selected for this user."
+            "index": 0,
+            "score": 0.95,
+            "reason": "Highly relevant to AI interests"
+        }},
+        {{
+            "index": 5,
+            "score": 0.87,
+            "reason": "Valuable industry insights"
         }}
-        // ... more selected articles up to {target_articles} ...
     ]
 }}
 
-Ensure the output is pure JSON. Select exactly {target_articles} articles and provide clear reasoning for each selection."""
+Select exactly {target_articles} articles by their index numbers. Respond with ONLY the JSON object above."""
         
         return prompt
     
     async def _invoke_llm_with_structured_output(self, prompt: str) -> Dict[str, Any]:
         """
-        Invoke LLM with structured output parsing for article selection.
-        
-        Args:
-            prompt: Prompt to send to LLM
-            
-        Returns:
-            Parsed LLM response as dictionary
+        Invoke LLM with improved structured output parsing for article selection.
         """
         try:
             from app.services.ai_service import AIService
@@ -411,17 +559,26 @@ Ensure the output is pure JSON. Select exactly {target_articles} articles and pr
             system_prompt = """You are an expert content curator for LinkedIn professionals. 
             Analyze the provided articles and select the most relevant ones based on user preferences.
             
+            CRITICAL: Your response must be valid JSON. Double-check your JSON syntax.
+            
             Return your response as a JSON object with this exact structure:
             {
-                "selected_articles": [
+                "selections": [
                     {
-                        "url": "article_url",
-                        "title": "article_title",
-                        "relevance_score": 0.85,
-                        "selection_reason": "Brief explanation of why this article was selected"
+                        "index": 0,
+                        "score": 0.85,
+                        "reason": "Brief explanation"
                     }
                 ]
-            }"""
+            }
+            
+            IMPORTANT JSON RULES:
+            - Use double quotes for all strings
+            - No trailing commas
+            - Escape any quotes inside strings with backslashes
+            - Keep reason brief (under 50 characters)
+            - Ensure all objects are properly closed with }
+            """
             
             # Use the AI service to get structured response
             langchain_messages: List[BaseMessage] = [
@@ -431,55 +588,43 @@ Ensure the output is pure JSON. Select exactly {target_articles} articles and pr
             
             response_text, metrics = await ai_service._invoke_llm_with_fallback(
                 messages=langchain_messages,
-                max_tokens=1500,
-                temperature=0.3
+                max_tokens=2000,
+                temperature=0.1
             )
             
-            # Clean the response_text to remove Markdown fences
-            cleaned_response_text = response_text.strip()
+            logger.debug(f"Raw LLM response length: {len(response_text)} characters")
             
-            # Try to extract JSON using regex, looking for content between { and }
-            # This is more robust against variations in markdown fences or surrounding text
-            match = re.search(r'\{[\s\S]*\}', cleaned_response_text)
-            if match:
-                json_str_candidate = match.group(0)
-                try:
-                    # Attempt to parse this candidate string
-                    parsed_json = json.loads(json_str_candidate)
-                    logger.debug(f"Successfully parsed JSON extracted by regex: {json_str_candidate[:200]}...")
-                    return parsed_json # Return the successfully parsed JSON
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Regex extracted a string, but it's not valid JSON: '{json_str_candidate[:200]}...'. Error: {e}")
-                    # Fall through to old cleaning logic or directly to fallback
-            
-            # Fallback to simpler string stripping if regex fails or doesn't find a clear JSON block
-            # (This is your previous cleaning logic, can be kept as a secondary attempt)
-            if cleaned_response_text.startswith("```json"):
-                cleaned_response_text = cleaned_response_text[len("```json"):]
-            elif cleaned_response_text.startswith("```"):
-                 cleaned_response_text = cleaned_response_text[len("```"):]
-            
-            if cleaned_response_text.endswith("```"):
-                cleaned_response_text = cleaned_response_text[:-len("```")]
-            
-            cleaned_response_text = cleaned_response_text.strip()
-
+            # Use the robust JSON extraction
             try:
-                return json.loads(cleaned_response_text)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse LLM response as JSON even after cleaning. Original: '{response_text[:500]}...', Cleaned: '{cleaned_response_text[:500]}...'")
-                return await self._fallback_selection_response()
+                parsed_json = extract_json_from_response(response_text)
+                logger.info(f"Successfully parsed JSON with {len(parsed_json.get('selections', []))} selections")
+                return parsed_json
                 
+            except json.JSONDecodeError as e:
+                logger.error(f"All JSON parsing strategies failed. Response preview: {response_text[:500]}...")
+                logger.error(f"JSON error: {str(e)}")
+                
+                # Save the problematic response for debugging
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                        f.write(response_text)
+                        logger.error(f"Saved problematic LLM response to: {f.name}")
+                except Exception:
+                    pass
+                
+                # Return fallback response
+                return await self._fallback_selection_response()
+                    
         except Exception as e:
             logger.error(f"LLM service failed: {str(e)}")
-            # Implement fallback selection logic
             return await self._fallback_selection_response()
 
     async def _fallback_selection_response(self) -> Dict[str, Any]:
-        """Fallback response when LLM fails."""
+        """Enhanced fallback response when LLM fails."""
+        logger.warning("Using fallback selection due to LLM/JSON parsing failure")
         return {
-            "selected_articles": [],
-            "error": "LLM service unavailable - using fallback selection",
+            "selections": [],
+            "error": "LLM service or JSON parsing failed - using fallback selection",
             "fallback": True
         }
     
@@ -489,68 +634,82 @@ Ensure the output is pure JSON. Select exactly {target_articles} articles and pr
         candidates: List[ArticleCandidate]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         """
-        Parse the LLM response and match with candidate articles.
-        
-        Args:
-            llm_response: Response from LLM
-            candidates: Original candidate articles
-            
-        Returns:
-            Tuple of (selected_articles, selection_reasons)
+        Parse the simplified LLM response format.
         """
         try:
             selected_articles = []
             selection_reasons = {}
             
-            # Create URL to candidate mapping
-            url_to_candidate = {candidate.url: candidate for candidate in candidates}
+            selections = llm_response.get("selections", [])
             
-            for selection in llm_response.get("selected_articles", []):
-                url = selection.get("url")
-                if url in url_to_candidate:
-                    candidate = url_to_candidate[url]
-                    
-                    article_data = {
-                        "title": candidate.title,
-                        "url": candidate.url,
-                        "content": candidate.content,
-                        "author": candidate.author,
-                        "published_at": candidate.published_at.isoformat() if candidate.published_at else None,
-                        "source_name": candidate.source_name,
-                        "source_id": str(candidate.source_id) if candidate.source_id else None,
-                        "word_count": candidate.word_count,
-                        "relevance_score": selection.get("relevance_score", 0.7),
-                        "selection_reason": selection.get("selection_reason", "Selected by AI")
-                    }
-                    
-                    selected_articles.append(article_data)
-                    selection_reasons[url] = selection.get("selection_reason", "Selected by AI")
+            # Process index-based selections
+            for selection in selections:
+                try:
+                    index = selection.get("index")
+                    if index is None:
+                        continue
+                        
+                    if 0 <= index < len(candidates):
+                        candidate = candidates[index]
+                        
+                        article_data = {
+                            "title": candidate.title,
+                            "url": candidate.url,
+                            "content": candidate.content,
+                            "author": candidate.author,
+                            "published_at": candidate.published_at.isoformat() if candidate.published_at else None,
+                            "source_name": candidate.source_name,
+                            "source_id": str(candidate.source_id) if candidate.source_id else None,
+                            "word_count": candidate.word_count,
+                            "relevance_score": selection.get("score", 0.7),
+                            "selection_reason": selection.get("reason", "Selected by AI")
+                        }
+                        
+                        selected_articles.append(article_data)
+                        selection_reasons[candidate.url] = selection.get("reason", "Selected by AI")
+                    else:
+                        logger.warning(f"Invalid article index: {index} (max: {len(candidates)-1})")
+                        
+                except Exception as e:
+                    logger.warning(f"Error processing selection: {str(e)}")
+                    continue
             
-            return selected_articles, selection_reasons
-            
+            if selected_articles:
+                logger.info(f"Successfully parsed {len(selected_articles)} article selections")
+                return selected_articles, selection_reasons
+            else:
+                logger.warning("No valid articles found in LLM response, using fallback")
+                return self._create_fallback_selection(candidates)
+                
         except Exception as e:
             logger.error(f"Error parsing LLM selection response: {str(e)}")
-            # Fallback: return first few candidates
-            fallback_articles = []
-            fallback_reasons = {}
+            return self._create_fallback_selection(candidates)
+
+    def _create_fallback_selection(self, candidates: List[ArticleCandidate], max_articles: int = 5) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+        """Create a fallback selection when LLM parsing fails."""
+        fallback_articles = []
+        fallback_reasons = {}
+        
+        # Select first few candidates as fallback
+        for i, candidate in enumerate(candidates[:max_articles]):
+            article_data = {
+                "title": candidate.title,
+                "url": candidate.url,
+                "content": candidate.content,
+                "author": candidate.author,
+                "published_at": candidate.published_at.isoformat() if candidate.published_at else None,
+                "source_name": candidate.source_name,
+                "source_id": str(candidate.source_id) if candidate.source_id else None,
+                "word_count": candidate.word_count,
+                "relevance_score": 0.6,
+                "selection_reason": "Fallback selection due to LLM parsing error"
+            }
             
-            for i, candidate in enumerate(candidates[:5]):  # Return first 5 as fallback
-                article_data = {
-                    "title": candidate.title,
-                    "url": candidate.url,
-                    "content": candidate.content,
-                    "author": candidate.author,
-                    "published_at": candidate.published_at.isoformat() if candidate.published_at else None,
-                    "source_name": candidate.source_name,
-                    "word_count": candidate.word_count,
-                    "relevance_score": 0.7,
-                    "selection_reason": "Fallback selection due to LLM parsing error"
-                }
-                
-                fallback_articles.append(article_data)
-                fallback_reasons[candidate.url] = "Fallback selection due to LLM parsing error"
-            
-            return fallback_articles, fallback_reasons
+            fallback_articles.append(article_data)
+            fallback_reasons[candidate.url] = "Fallback selection due to LLM parsing error"
+        
+        logger.info(f"Created fallback selection with {len(fallback_articles)} articles")
+        return fallback_articles, fallback_reasons
     
     async def _get_cached_selection(self, user_id: UUID) -> Optional[ContentSelectionResult]:
         """Get cached content selection for user."""
@@ -652,9 +811,9 @@ Ensure the output is pure JSON. Select exactly {target_articles} articles and pr
                 llm_model_used=processing_details.get("llm_model", "unknown"),
                 selection_criteria=processing_details.get("selection_criteria", {}),
                 processing_time_seconds=processing_details.get("processing_time_seconds", 0.0),
-                selected_article_ids=[],  # Would be populated with actual IDs
-                selection_scores={},  # Would be populated with scores
-                selection_reasons={}  # Would be populated with reasons
+                selected_article_ids=[],
+                selection_scores={},
+                selection_reasons={}
             )
             
             self.session.add(selection_record)
@@ -664,7 +823,6 @@ Ensure the output is pure JSON. Select exactly {target_articles} articles and pr
             
         except Exception as e:
             logger.error(f"Error recording content selection: {str(e)}")
-            # Don't raise - this is just for analytics
     
     # Legacy methods for backward compatibility
     async def process_all_sources(self, user_id: Optional[UUID] = None):

@@ -946,50 +946,52 @@
         const Dashboard = ({ user }) => {
             const [activeTab, setActiveTab] = useState('overview');
 
-            return (
-                <div className="dashboard">
-                    <aside className="sidebar">
-                        <h3>Navigation</h3>
-                        <ul className="nav-menu">
-                            {/* Existing tabs */}
-                            <li><a href="#" className={activeTab === 'overview' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}>📊 Overview</a></li>
-                            <li><a href="#" className={activeTab === 'sources' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}>📡 Content Sources</a></li>
-                            <li><a href="#" className={activeTab === 'feed' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}>📰 Content Feed</a></li>
-                            <li><a href="#" className={activeTab === 'drafts' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}>✏️ Post Drafts</a></li>
-                            
-                            {/* NEW: Comment Management Section */}
-                            <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
-                                <span style={{fontSize: '0.9rem', fontWeight: 'bold', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px'}}>
-                                    Comment Management
-                                </span>
-                            </li>
-                            <li><a href="#" className={activeTab === 'comment-discovery' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-discovery'); }}>🔍 Comment Discovery</a></li>
-                            <li><a href="#" className={activeTab === 'comment-queue' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-queue'); }}>📝 Comment Queue</a></li>
-                            <li><a href="#" className={activeTab === 'comment-analytics' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-analytics'); }}>📈 Comment Analytics</a></li>
-                            
-                            {/* Existing preferences tab */}
-                            <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
-                                <a href="#" className={activeTab === 'preferences' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('preferences'); }}>⚙️ Settings</a>
-                            </li>
-                        </ul>
-                    </aside>
+            //Switch tabs programmatically
+            const switchToTab = (tabName) => {
+                setActiveTab(tabName);
+            };
 
-                    <div className="content-area">
-                        {/* Existing tabs */}
-                        {activeTab === 'overview' && <OverviewTab />}
-                        {activeTab === 'sources' && <SourcesTab />}
-                        {activeTab === 'feed' && <FeedTab />}
-                        {activeTab === 'drafts' && <DraftsTab />}
-                        {activeTab === 'preferences' && <PreferencesTab />}
+            return (
+            <div className="dashboard">
+                <aside className="sidebar">
+                    <h3>Navigation</h3>
+                    <ul className="nav-menu">
+                        <li><a href="#" className={activeTab === 'overview' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('overview'); }}>📊 Overview</a></li>
+                        <li><a href="#" className={activeTab === 'sources' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('sources'); }}>📡 Content Sources</a></li>
+                        <li><a href="#" className={activeTab === 'feed' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('feed'); }}>📰 Content Feed</a></li>
+                        <li><a href="#" className={activeTab === 'drafts' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('drafts'); }}>✏️ Post Drafts</a></li>
                         
-                        {/* NEW: Comment Management tabs */}
-                        {activeTab === 'comment-discovery' && <CommentDiscoveryTab />}
-                        {activeTab === 'comment-queue' && <CommentQueueTab />}
-                        {activeTab === 'comment-analytics' && <CommentAnalyticsTab />}
-                    </div>
+                        {/* Comment Management Section */}
+                        <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
+                            <span style={{fontSize: '0.9rem', fontWeight: 'bold', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px'}}>
+                                Comment Management
+                            </span>
+                        </li>
+                        <li><a href="#" className={activeTab === 'comment-discovery' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-discovery'); }}>🔍 Comment Discovery</a></li>
+                        <li><a href="#" className={activeTab === 'comment-queue' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-queue'); }}>📝 Comment Queue</a></li>
+                        <li><a href="#" className={activeTab === 'comment-analytics' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('comment-analytics'); }}>📈 Comment Analytics</a></li>
+                        
+                        <li style={{borderTop: '1px solid #e9ecef', marginTop: '1rem', paddingTop: '1rem'}}>
+                            <a href="#" className={activeTab === 'preferences' ? 'active' : ''} onClick={(e) => { e.preventDefault(); setActiveTab('preferences'); }}>⚙️ Settings</a>
+                        </li>
+                    </ul>
+                </aside>
+
+                <div className="content-area">
+                    {activeTab === 'overview' && <OverviewTab />}
+                    {activeTab === 'sources' && <SourcesTab />}
+                    {activeTab === 'feed' && <FeedTab switchToTab={switchToTab} />}
+                    {activeTab === 'drafts' && <DraftsTab />}
+                    {activeTab === 'preferences' && <PreferencesTab />}
+                    
+                    {/* Comment Management tabs */}
+                    {activeTab === 'comment-discovery' && <CommentDiscoveryTab />}
+                    {activeTab === 'comment-queue' && <CommentQueueTab />}
+                    {activeTab === 'comment-analytics' && <CommentAnalyticsTab />}
                 </div>
-            );
-        };
+            </div>
+        );
+    };
 
         // Overview Tab - FIXED with real API calls
         const OverviewTab = () => {
@@ -1841,19 +1843,25 @@
         };
 
         // FeedTab
-        const FeedTab = () => {
+        const FeedTab = ({ switchToTab }) => {
             const [content, setContent] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState('');
+            const [sortBy, setSortBy] = useState('newest'); // NEW: Sort state
             const { apiCall, addToast } = useApi();
 
             useEffect(() => {
                 loadContent();
-            }, []);
+            }, [sortBy]); // Reload when sort changes
 
             const loadContent = async () => {
                 try {
-                    const data = await apiCall('/content/feed');
+                    setLoading(true);
+                    const params = new URLSearchParams();
+                    params.append('sort_by', sortBy);
+                    params.append('limit', '20');
+                    
+                    const data = await apiCall(`/content/feed?${params}`);
                     setContent(data);
                 } catch (err) {
                     setError(err.message);
@@ -1862,7 +1870,34 @@
                 }
             };
 
-            if (loading) {
+            const handleSmartSelection = async () => {
+                try {
+                    setLoading(true);
+                    const result = await apiCall('/content/select-content', { method: 'POST' });
+                    
+                    const selectedCount = result.selection_metadata?.articles_selected || 0;
+                    const markedCount = result.selection_metadata?.marked_for_visibility || 0;
+                    
+                    addToast(
+                        `Smart selection completed! ${selectedCount} articles selected, ${markedCount} marked for visibility`, 
+                        'success'
+                    );
+                    
+                    // Auto-switch to LLM-selected view if articles were selected
+                    if (selectedCount > 0) {
+                        setSortBy('llm_selected');
+                        addToast('Switched to LLM-selected view to show your curated content', 'info');
+                    } else {
+                        loadContent(); // Just refresh current view
+                    }
+                } catch (err) {
+                    addToast('Content selection failed: ' + err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading && content.length === 0) {
                 return <div className="loading">Loading content...</div>;
             }
 
@@ -1870,18 +1905,22 @@
                 <div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
                         <h2>Content Feed</h2>
-                        <div style={{display: 'flex', gap: '0.5rem'}}>
+                        <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                            {/* NEW: Sort selector */}
+                            <select
+                                className="form-control"
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value)}
+                                style={{width: 'auto', minWidth: '150px'}}
+                            >
+                                <option value="newest">📅 Newest First</option>
+                                <option value="relevance">⭐ By Relevance</option>
+                                <option value="llm_selected">🧠 AI Selected</option>
+                            </select>
+                            
                             <button 
                                 className="btn btn-secondary"
-                                onClick={async () => {
-                                    try {
-                                        await apiCall('/content/select-content', { method: 'POST' });
-                                        addToast('Smart content selection completed!', 'success');
-                                        loadContent(); // Refresh feed
-                                    } catch (err) {
-                                        addToast('Content selection failed: ' + err.message, 'error');
-                                    }
-                                }}
+                                onClick={handleSmartSelection}
                                 disabled={loading}
                             >
                                 🧠 Smart Selection
@@ -1896,19 +1935,47 @@
                         </div>
                     </div>
 
+                    {/* NEW: Info banner for LLM-selected content */}
+                    {sortBy === 'llm_selected' && (
+                        <div className="alert alert-info" style={{background: '#d1ecf1', color: '#0c5460', border: '1px solid #bee5eb', marginBottom: '1rem'}}>
+                            🧠 <strong>AI-Selected Content:</strong> These articles were specifically chosen by AI based on your preferences and interests.
+                            {content.length === 0 && " Run 'Smart Selection' to populate this view."}
+                        </div>
+                    )}
+
                     {error && (
                         <div className="alert alert-error">{error}</div>
                     )}
 
                     {content.length === 0 ? (
                         <div className="empty-state">
-                            <h3>No content found</h3>
-                            <p>Add some content sources and wait for content to be discovered!</p>
+                            <h3>
+                                {sortBy === 'llm_selected' ? 'No AI-selected content found' : 'No content found'}
+                            </h3>
+                            <p>
+                                {sortBy === 'llm_selected' 
+                                    ? 'Run Smart Selection to get AI-curated articles based on your preferences!'
+                                    : 'Add some content sources and wait for content to be discovered!'
+                                }
+                            </p>
+                            {sortBy === 'llm_selected' && (
+                                <button 
+                                    className="btn btn-primary"
+                                    onClick={handleSmartSelection}
+                                    disabled={loading}
+                                >
+                                    🧠 Run Smart Selection
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <div>
                             {content.map(item => (
-                                <ContentCard key={item.id} item={item} />
+                                <ContentCard 
+                                    key={item.id} 
+                                    item={item} 
+                                    switchToTab={switchToTab}  // Pass navigation function
+                                />
                             ))}
                         </div>
                     )}
@@ -1917,23 +1984,55 @@
         };
 
         // Content Card Component
-        const ContentCard = ({ item }) => {
+        const ContentCard = ({ item, switchToTab }) => {
+            const [generatingDraft, setGeneratingDraft] = useState(false);
+            const { apiCall, addToast } = useApi();
+
             const handleGenerateDraft = async () => {
                 try {
-                    await apiCall('/drafts', {
+                    setGeneratingDraft(true);
+                    const draft = await apiCall('/drafts', {
                         method: 'POST',
                         body: JSON.stringify({
                             content_item_id: item.id
                         }),
                     });
-                    alert('Draft generated successfully!');
+                    
+                    // FIXED: Redirect to drafts tab and show success message
+                    addToast('Draft generated successfully! Redirecting to drafts...', 'success');
+                    
+                    // Redirect to drafts tab after a short delay
+                    setTimeout(() => {
+                        switchToTab('drafts');
+                    }, 1000);
+                    
                 } catch (err) {
-                    alert('Failed to generate draft: ' + err.message);
+                    addToast('Failed to generate draft: ' + err.message, 'error');
+                } finally {
+                    setGeneratingDraft(false);
                 }
             };
 
+            // NEW: Display AI selection reason if available
+            const selectionReason = item.ai_analysis?.selection_reason;
+            const isLLMSelected = item.ai_analysis?.llm_selected;
+
             return (
                 <div className="card">
+                    {/* NEW: LLM selection indicator */}
+                    {isLLMSelected && (
+                        <div style={{
+                            background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                            color: 'white',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            marginBottom: '1rem',
+                            fontSize: '0.9rem'
+                        }}>
+                            🧠 <strong>AI Selected:</strong> {selectionReason || 'Chosen by AI for relevance to your interests'}
+                        </div>
+                    )}
+
                     <h3>{item.title}</h3>
                     <p>{item.content.substring(0, 200)}...</p>
                     <div style={{marginBottom: '1rem'}}>
@@ -1942,6 +2041,10 @@
                         ))}
                         {item.relevance_score && (
                             <span className="tag">Score: {item.relevance_score}</span>
+                        )}
+                        {/* NEW: Show if content is LLM selected */}
+                        {isLLMSelected && (
+                            <span className="tag" style={{background: '#667eea', color: 'white'}}>AI Selected</span>
                         )}
                     </div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -1955,8 +2058,16 @@
                             <button 
                                 className="btn btn-primary"
                                 onClick={handleGenerateDraft}
+                                disabled={generatingDraft}
                             >
-                                ✨ Generate Draft
+                                {generatingDraft ? (
+                                    <>
+                                        <span className="loading-spinner" style={{width: '1em', height: '1em', marginRight: '0.5rem'}} />
+                                        Generating...
+                                    </>
+                                ) : (
+                                    '✨ Generate Draft'
+                                )}
                             </button>
                             <a 
                                 href={item.url} 
