@@ -1,3 +1,4 @@
+# app/main.py - Updated with proper CORS configuration
 """
 FastAPI main application for LinkedIn Presence Automation Application.
 
@@ -8,7 +9,6 @@ and application lifecycle management.
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,10 +24,10 @@ from app.core.middleware import (
     RequestLoggingMiddleware, 
     SecurityHeadersMiddleware
 )
-# from app.core.config import get_settings
+from app.core.cors import setup_cors  # Import CORS setup
+from app.core.config import settings  # Import settings
 from app.core.security import get_current_user
 from app.database.connection import init_database, close_database, run_migrations
-from app.api.v1.router import api_router
 from app.utils.exceptions import (
     get_http_status_code, 
     format_error_response,
@@ -40,21 +40,18 @@ from app.utils.exceptions import (
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, settings.LOG_LEVEL.upper()),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting LinkedIn Automation Application...")
     try:
         logger.info("Initializing database connection...")
-        await init_database() # This just initializes db_manager
-        # No need to call run_migrations() here if entrypoint.sh does it
-        logger.info("Application startup completed successfully (migrations handled by entrypoint).")
+        await init_database()
+        logger.info("Application startup completed successfully.")
     except Exception as e:
         logger.error(f"Failed to start application: {str(e)}", exc_info=True)
         raise
@@ -70,22 +67,17 @@ app = FastAPI(
     title="LinkedIn Presence Automation API",
     description="Automated LinkedIn content creation and posting system",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    debug=settings.DEBUG
 )
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configure CORS - IMPORTANT: This must be first!
+setup_cors(app)
 
 # Add trusted host middleware
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    allowed_hosts=settings.ALLOWED_HOSTS
 )
 
 # Add custom middleware
@@ -96,7 +88,7 @@ app.add_middleware(RateLimitMiddleware)
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
 
-
+# Exception handlers
 @app.exception_handler(ContentNotFoundError)
 async def content_not_found_handler(request: Request, exc: ContentNotFoundError):
     """Handle content not found errors."""
@@ -109,7 +101,6 @@ async def content_not_found_handler(request: Request, exc: ContentNotFoundError)
         }
     )
 
-
 @app.exception_handler(InvalidCredentialsError)
 async def invalid_credentials_handler(request: Request, exc: InvalidCredentialsError):
     """Handle invalid credentials errors."""
@@ -121,7 +112,6 @@ async def invalid_credentials_handler(request: Request, exc: InvalidCredentialsE
             "timestamp": datetime.utcnow().isoformat()
         }
     )
-
 
 @app.exception_handler(RateLimitExceededError)
 async def rate_limit_handler(request: Request, exc: RateLimitExceededError):
@@ -136,7 +126,6 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceededError):
         }
     )
 
-
 @app.exception_handler(ValidationError)
 async def validation_error_handler(request: Request, exc: ValidationError):
     """Handle validation errors."""
@@ -148,7 +137,6 @@ async def validation_error_handler(request: Request, exc: ValidationError):
             "timestamp": datetime.utcnow().isoformat()
         }
     )
-
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_handler(request: Request, exc: RequestValidationError):
@@ -201,7 +189,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         }
     )
 
-
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
@@ -215,7 +202,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
-
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
@@ -228,7 +214,6 @@ async def root():
         "redoc": "/redoc"
     }
 
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -238,13 +223,12 @@ async def health_check():
         "version": "1.0.0"
     }
 
-
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8000")),
-        reload=os.getenv("DEBUG", "False").lower() == "true",
+        reload=settings.DEBUG,
         workers=int(os.getenv("WORKERS", "1")),
-        log_level=os.getenv("LOG_LEVEL", "info").lower()
+        log_level=settings.LOG_LEVEL.lower()
     )

@@ -1,22 +1,34 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useAuthStore } from '@/stores/authStore'
+import { notify } from '@/stores/uiStore'
 
 export default function LoginPage() {
+  const navigate = useNavigate()
+  const { login, isLoading, error, clearError } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
-    
-    // Mock login - replace with real authentication
-    setTimeout(() => {
-      setIsLoading(false)
-      console.log('Login attempt:', { email, password })
-    }, 1000)
+    clearError()
+
+    if (!email || !password) {
+      notify.error('Validation Error', 'Please enter both email and password')
+      return
+    }
+
+    try {
+      await login(email, password)
+      notify.success('Login successful!')
+      navigate('/dashboard')
+    } catch (error: any) {
+      // Error is already handled by the auth store
+      // Just show a notification if needed
+      notify.error('Login Failed', error.message || 'Please check your credentials')
+    }
   }
 
   return (
@@ -29,6 +41,12 @@ export default function LoginPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        )}
+
         <Input
           label="Email address"
           type="email"
@@ -36,6 +54,7 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Enter your email"
           required
+          disabled={isLoading}
         />
 
         <Input
@@ -45,6 +64,7 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Enter your password"
           required
+          disabled={isLoading}
         />
 
         <Button
@@ -52,8 +72,9 @@ export default function LoginPage() {
           className="w-full"
           variant="ai"
           loading={isLoading}
+          disabled={isLoading}
         >
-          Sign in
+          {isLoading ? 'Signing in...' : 'Sign in'}
         </Button>
       </form>
 
@@ -66,6 +87,12 @@ export default function LoginPage() {
           >
             Sign up here
           </Link>
+        </p>
+      </div>
+
+      <div className="text-center">
+        <p className="text-xs text-gray-500">
+          Having trouble? Contact support or try the demo account
         </p>
       </div>
     </div>
