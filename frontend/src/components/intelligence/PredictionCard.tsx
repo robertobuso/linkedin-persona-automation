@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { ConfidenceIndicator } from './ConfidenceIndicator'
 import { EngagementPrediction } from '@/lib/api'
+import { cn } from '@/utils/cn' // Added missing import
 
 interface PredictionCardProps {
   prediction: EngagementPrediction

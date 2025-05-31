@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { ConfidenceIndicator } from '@/components/intelligence/ConfidenceIndicator'
 import { PersonaMetrics } from '@/lib/api'
-import { ArrowTrendingUpIcon,ArrowTrendingDownIcon } from '@heroicons/react/24/outline'
+import { ArrowTrendingUpIcon, ArrowTrendingDownIcon } from '@heroicons/react/24/outline'
 
 interface PersonaInsightsProps {
   metrics?: PersonaMetrics
@@ -58,7 +58,7 @@ export function PersonaInsights({ metrics }: PersonaInsightsProps) {
                 {insight.trend === 'up' ? (
                   <ArrowTrendingUpIcon className="h-4 w-4 text-ml-green-500" />
                 ) : insight.trend === 'down' ? (
-                  <ArrowArrowTrendingDownIcon className="h-4 w-4 text-red-500" />
+                  <ArrowTrendingDownIcon className="h-4 w-4 text-red-500" />
                 ) : null}
               </div>
               <p className="text-sm text-gray-600 mb-2">{insight.description}</p>

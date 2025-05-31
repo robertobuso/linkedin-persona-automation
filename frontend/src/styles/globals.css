@@ -1,8 +1,5 @@
+@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 @layer base {
   html {
@@ -15,6 +12,53 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: 'Inter', system-ui, sans-serif;
   }
+}
+
+/* Custom theme definitions for Tailwind v4 */
+@theme {
+  --color-neural-50: #f8fafc;
+  --color-neural-100: #f1f5f9;
+  --color-neural-200: #e2e8f0;
+  --color-neural-300: #cbd5e1;
+  --color-neural-400: #94a3b8;
+  --color-neural-500: #64748b;
+  --color-neural-600: #475569;
+  --color-neural-700: #334155;
+  --color-neural-800: #1e293b;
+  --color-neural-900: #0f172a;
+
+  --color-ai-purple-50: #faf5ff;
+  --color-ai-purple-100: #f3e8ff;
+  --color-ai-purple-200: #e9d5ff;
+  --color-ai-purple-300: #d8b4fe;
+  --color-ai-purple-400: #c084fc;
+  --color-ai-purple-500: #a855f7;
+  --color-ai-purple-600: #9333ea;
+  --color-ai-purple-700: #7c3aed;
+  --color-ai-purple-800: #6b21a8;
+  --color-ai-purple-900: #581c87;
+
+  --color-ml-green-50: #ecfdf5;
+  --color-ml-green-100: #d1fae5;
+  --color-ml-green-200: #a7f3d0;
+  --color-ml-green-300: #6ee7b7;
+  --color-ml-green-400: #34d399;
+  --color-ml-green-500: #10b981;
+  --color-ml-green-600: #059669;
+  --color-ml-green-700: #047857;
+  --color-ml-green-800: #065f46;
+  --color-ml-green-900: #064e3b;
+
+  --color-prediction-50: #eff6ff;
+  --color-prediction-100: #dbeafe;
+  --color-prediction-200: #bfdbfe;
+  --color-prediction-300: #93c5fd;
+  --color-prediction-400: #60a5fa;
+  --color-prediction-500: #3b82f6;
+  --color-prediction-600: #2563eb;
+  --color-prediction-700: #1d4ed8;
+  --color-prediction-800: #1e40af;
+  --color-prediction-900: #1e3a8a;
 }
 
 @layer utilities {

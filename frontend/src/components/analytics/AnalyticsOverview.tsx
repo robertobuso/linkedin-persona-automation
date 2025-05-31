@@ -1,7 +1,7 @@
 import React from 'react'
 import { 
   ArrowTrendingUpIcon, 
- ArrowTrendingDownIcon, 
+  ArrowTrendingDownIcon, // Fixed: removed duplicate "Arrow"
   EyeIcon, 
   HeartIcon,
   ChatBubbleLeftIcon,
@@ -68,7 +68,7 @@ export function AnalyticsOverview({ metrics }: AnalyticsOverviewProps) {
                   {stat.trend === 'up' ? (
                     <ArrowTrendingUpIcon className="h-4 w-4 text-ml-green-500 mr-1" />
                   ) : (
-                    <ArrowArrowTrendingDownIcon className="h-4 w-4 text-red-500 mr-1" />
+                    <ArrowTrendingDownIcon className="h-4 w-4 text-red-500 mr-1" />
                   )}
                   <span className={`text-sm ${stat.trend === 'up' ? 'text-ml-green-600' : 'text-red-600'}`}>
                     {stat.change}
