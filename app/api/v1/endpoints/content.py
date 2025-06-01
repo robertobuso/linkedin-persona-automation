@@ -18,6 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from datetime import datetime, timedelta
+from sqlalchemy import func, select
+
 
 logger = logging.getLogger(__name__)
 
@@ -672,4 +675,159 @@ async def get_content_stats(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get content stats: {str(e)}"
+            )
+        
+@router.get("/content-by-mode", response_model=List[ContentItemResponse])
+async def get_content_by_mode(
+    mode: str = Query(..., description="Content mode: ai-selected, fresh, trending, all"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> List[ContentItemResponse]:
+    """Get content by different modes."""
+    async with db_session_cm as session:
+        try:
+            content_repo = ContentItemRepository(session)
+            
+            if mode == "ai-selected":
+                # Get high-relevance AI-selected content
+                items = await content_repo.get_high_relevance_items(
+                    user_id=current_user.id,
+                    limit=limit
+                )
+            elif mode == "fresh":
+                # Get most recent content - you may need to implement this method
+                # For now, use the same as 'all' but ordered by created_at DESC
+                source_repo = ContentSourceRepository(session)
+                user_sources = await source_repo.get_active_sources_by_user(current_user.id)
+                source_ids = [source.id for source in user_sources]
+                
+                if source_ids:
+                    # Get recent items from user's sources
+                    items = await content_repo.get_recent_items_from_sources(
+                        source_ids=source_ids,
+                        limit=limit,
+                        offset=offset
+                    )
+                else:
+                    items = []
+            elif mode == "trending":
+                # Get trending content (implement your own logic)
+                # For now, get high-relevance items
+                items = await content_repo.get_high_relevance_items(
+                    user_id=current_user.id,
+                    limit=limit
+                )
+            else:  # mode == "all"
+                # Get all content from user's sources
+                source_repo = ContentSourceRepository(session)
+                user_sources = await source_repo.get_active_sources_by_user(current_user.id)
+                source_ids = [source.id for source in user_sources]
+                
+                if source_ids:
+                    items = await content_repo.get_items_from_sources(
+                        source_ids=source_ids,
+                        limit=limit,
+                        offset=offset
+                    )
+                else:
+                    items = []
+            
+            return [ContentItemResponse.model_validate(item) for item in items]
+            
+        except Exception as e:
+            logger.error(f"Failed to get content by mode {mode}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get {mode} content"
+            )
+
+@router.get("/daily-summary", response_model=dict)
+async def get_daily_article_summary(
+    date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> dict:
+    """Get daily article summary with AI selection metadata."""
+    from datetime import datetime, timedelta
+    
+    target_date = date or datetime.utcnow().date().isoformat()
+    
+    async with db_session_cm as session:
+        try:
+            content_repo = ContentItemRepository(session)
+            source_repo = ContentSourceRepository(session)
+            
+            # Get user's sources
+            user_sources = await source_repo.get_active_sources_by_user(current_user.id)
+            source_ids = [source.id for source in user_sources]
+            
+            if not source_ids:
+                return {
+                    "date": target_date,
+                    "total_articles": 0,
+                    "ai_selected_count": 0,
+                    "summary_text": "No content sources configured",
+                    "selection_metadata": {
+                        "avg_relevance_score": 0,
+                        "top_categories": []
+                    }
+                }
+            
+            # Parse target date
+            try:
+                target_datetime = datetime.fromisoformat(target_date)
+                start_date = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = start_date + timedelta(days=1)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid date format. Use YYYY-MM-DD"
+                )
+            
+            # Get total articles for the date
+            total_articles = await content_repo.count_items_by_date_range(
+                source_ids=source_ids,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get AI-selected articles count
+            ai_selected_count = await content_repo.count_high_relevance_items_by_date(
+                user_id=current_user.id,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get average relevance score
+            avg_relevance = await content_repo.get_avg_relevance_score_by_date(
+                user_id=current_user.id,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get top categories (this might need to be implemented)
+            top_categories = []  # Implement if you have category data
+            
+            summary_text = f"Processed {total_articles} articles, selected {ai_selected_count} high-relevance items"
+            
+            return {
+                "date": target_date,
+                "total_articles": total_articles,
+                "ai_selected_count": ai_selected_count,
+                "summary_text": summary_text,
+                "selection_metadata": {
+                    "avg_relevance_score": avg_relevance or 0,
+                    "top_categories": top_categories
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get daily summary: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to get daily summary"
             )

@@ -1,0 +1,221 @@
+[
+  {
+    "id": "tariff_risk_mck_2025",
+    "text": "A striking 18% of utilities currently mis-price tariff risk due to outdated models, leading to significant financial instability [McKinsey Global Institute, 2025]",
+    "keywords": [
+      "tariff",
+      "risk",
+      "pricing",
+      "utility",
+      "utilities",
+      "energy",
+      "finance",
+      "outdated",
+      "models",
+      "financial",
+      "instability"
+    ],
+    "industries": [
+      "energy",
+      "utilities",
+      "finance"
+    ],
+    "year": 2025,
+    "source_credibility": 0.9,
+    "tags": [
+      "finance",
+      "operations"
+    ]
+  },
+  {
+    "id": "decentralized_grid_irena_2024",
+    "text": "Innovative decentralized grids could slash outage costs by up to 30% in vulnerable areas, enhancing resilience significantly [IRENA, 2024]",
+    "keywords": [
+      "decentralized",
+      "grid",
+      "outage",
+      "costs",
+      "resilience",
+      "microgrid",
+      "distributed",
+      "energy",
+      "infrastructure"
+    ],
+    "industries": [
+      "energy",
+      "utilities",
+      "infrastructure"
+    ],
+    "year": 2024,
+    "source_credibility": 0.85,
+    "tags": [
+      "technology",
+      "sustainability"
+    ]
+  },
+  {
+    "id": "ai_exec_change_pwc_2024",
+    "text": "A significant 73% of executives believe AI will fundamentally reshape their industry within the next 3 years [PwC Global AI Study, 2024]",
+    "keywords": [
+      "ai",
+      "artificial",
+      "intelligence",
+      "executives",
+      "industry",
+      "change",
+      "transformation",
+      "machine",
+      "learning",
+      "automation"
+    ],
+    "industries": [
+      "technology",
+      "business",
+      "all"
+    ],
+    "year": 2024,
+    "source_credibility": 0.9,
+    "tags": [
+      "strategy",
+      "innovation"
+    ]
+  },
+  {
+    "id": "remote_work_prod_stanford_2024",
+    "text": "Stanford research indicates that 42% of remote workers report higher productivity compared to their in-office counterparts [Stanford Research, 2024]",
+    "keywords": [
+      "remote",
+      "work",
+      "hybrid",
+      "productivity",
+      "wfh",
+      "distributed",
+      "teams",
+      "future",
+      "workplace",
+      "office"
+    ],
+    "industries": [
+      "hr",
+      "management",
+      "technology",
+      "all"
+    ],
+    "year": 2024,
+    "source_credibility": 0.8,
+    "tags": [
+      "workforce",
+      "trends"
+    ]
+  },
+  {
+    "id": "cybersecurity_spend_gartner_2025",
+    "text": "Global cybersecurity spending is projected to exceed $215 billion in 2025 as threats become more sophisticated [Gartner, 2025]",
+    "keywords": [
+      "cybersecurity",
+      "spending",
+      "threats",
+      "data",
+      "protection",
+      "information",
+      "security",
+      "cyberattacks",
+      "breach"
+    ],
+    "industries": [
+      "technology",
+      "finance",
+      "healthcare",
+      "all"
+    ],
+    "year": 2025,
+    "source_credibility": 0.95,
+    "tags": [
+      "security",
+      "it"
+    ]
+  },
+  {
+    "id": "climate_investment_iea_2024",
+    "text": "Clean energy investments reached a record $1.8 trillion globally in 2024, outpacing fossil fuel investments 2:1 [IEA World Energy Outlook, 2024]",
+    "keywords": [
+      "clean",
+      "energy",
+      "investment",
+      "climate",
+      "renewable",
+      "solar",
+      "wind",
+      "green",
+      "sustainability",
+      "fossil",
+      "fuel"
+    ],
+    "industries": [
+      "energy",
+      "finance",
+      "sustainability",
+      "all"
+    ],
+    "year": 2024,
+    "source_credibility": 0.9,
+    "tags": [
+      "sustainability",
+      "finance"
+    ]
+  },
+  {
+    "id": "supply_chain_mckinsey_2024",
+    "text": "85% of companies plan to regionalize supply chains by 2026 to reduce geopolitical risks [McKinsey Supply Chain Survey, 2024]",
+    "keywords": [
+      "supply",
+      "chain",
+      "regionalize",
+      "geopolitical",
+      "risk",
+      "logistics",
+      "manufacturing",
+      "sourcing",
+      "resilience"
+    ],
+    "industries": [
+      "manufacturing",
+      "logistics",
+      "business",
+      "all"
+    ],
+    "year": 2024,
+    "source_credibility": 0.9,
+    "tags": [
+      "operations",
+      "strategy"
+    ]
+  },
+  {
+    "id": "talent_shortage_korn_ferry_2024",
+    "text": "The global talent shortage could reach 85.2 million people by 2030, potentially costing $8.5 trillion in unrealized revenue [Korn Ferry Institute, 2024]",
+    "keywords": [
+      "talent",
+      "shortage",
+      "skills",
+      "gap",
+      "hiring",
+      "recruitment",
+      "workforce",
+      "human",
+      "resources",
+      "labor"
+    ],
+    "industries": [
+      "hr",
+      "management",
+      "all"
+    ],
+    "year": 2024,
+    "source_credibility": 0.8,
+    "tags": [
+      "workforce",
+      "strategy"
+    ]
+  }
+]

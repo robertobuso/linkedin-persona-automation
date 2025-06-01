@@ -154,6 +154,51 @@ export interface EngagementPrediction {
   predicted_at: string
 }
 
+export interface LinkedInStatus {
+  connected: boolean
+  has_token: boolean
+  token_expires_at?: string
+  profile?: {
+    name: string
+    picture?: string
+    email?: string
+  }
+}
+
+export interface ContentSource {
+  id: string
+  user_id: string
+  name: string
+  source_type: string
+  url?: string
+  description?: string
+  is_active: boolean
+  check_frequency_hours: number
+  last_checked_at?: string
+  total_items_found: number
+  total_items_processed: number
+  created_at: string
+}
+
+export interface ContentPreferences {
+  id: string
+  user_id: string
+  job_role: string
+  industry: string
+  primary_interests: string[]
+  custom_prompt: string
+  min_relevance_score: number
+  max_articles_per_day: number
+  content_types: string[]
+  preferred_content_length: string
+  min_word_count: number
+  max_word_count: number
+  content_freshness_hours: number
+  learn_from_interactions: boolean
+  created_at: string
+  updated_at: string
+}
+
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -231,12 +276,16 @@ class APIClient {
   }
 
   // Content Management
-  async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Promise<ContentItem[]> {
-    const response = await this.client.get(`/content`, {
-      params: { mode },
-    })
-    return response.data.items || response.data
-  }
+async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Promise<ContentItem[]> {
+  const response = await this.client.get('/content/content-by-mode', {  // ✅ THIS IS CORRECT
+    params: { 
+      mode,
+      limit: 50,
+      offset: 0 
+    }
+  })
+  return response.data || []
+}
 
   async getDailyArticleSummary(date?: string): Promise<DailySummary> {
     const response = await this.client.get('/content/daily-summary', {
@@ -246,7 +295,7 @@ class APIClient {
   }
 
   async runAIContentSelection(): Promise<{ message: string; selected_count: number }> {
-    const response = await this.client.post('/content/ai-selection')
+    const response = await this.client.post('/content/trigger-ingestion')
     return response.data
   }
 
@@ -323,6 +372,105 @@ class APIClient {
     const response = await this.client.post('/engagement/comment', data)
     return response.data
   }
+
+// LinkedIn Connection
+async getLinkedInStatus(): Promise<LinkedInStatus> {
+  const response = await this.client.get('/auth/linkedin/status')
+  return response.data
+}
+
+async connectLinkedIn(): Promise<{ authorization_url: string; state: string; message: string }> {
+  const response = await this.client.get('/auth/linkedin/connect')
+  return response.data
+}
+
+async disconnectLinkedIn(): Promise<{ message: string }> {
+  const response = await this.client.delete('/auth/linkedin/disconnect')
+  return response.data
+}
+
+// Content Sources Management
+async getContentSources(): Promise<ContentSource[]> {
+  const response = await this.client.get('/content/sources')
+  return response.data
+}
+
+async createContentSource(data: {
+  name: string
+  source_type: string
+  url?: string
+  description?: string
+  is_active?: boolean
+  check_frequency_hours?: number
+}): Promise<ContentSource> {
+  const response = await this.client.post('/content/sources', data)
+  return response.data
+}
+
+async updateContentSource(id: string, data: Partial<ContentSource>): Promise<ContentSource> {
+  const response = await this.client.put(`/content/sources/${id}`, data)
+  return response.data
+}
+
+async deleteContentSource(id: string): Promise<void> {
+  await this.client.delete(`/content/sources/${id}`)
+}
+
+async validateFeedUrl(url: string): Promise<{
+  valid: boolean
+  title?: string
+  description?: string
+  entry_count?: number
+  error?: string
+}> {
+  const response = await this.client.post('/content/validate-feed', { url })
+  return response.data
+}
+
+// Content Preferences
+async getUserPreferences(): Promise<ContentPreferences> {
+  const response = await this.client.get('/preferences/preferences')
+  return response.data
+}
+
+async saveQuickPreferences(data: {
+  jobRole: string
+  industry: string
+  interests: string[]
+  customPrompt: string
+  relevanceThreshold: number
+  maxArticlesPerDay: number
+}): Promise<ContentPreferences> {
+  const response = await this.client.post('/preferences/quick-setup', data)
+  return response.data
+}
+
+async updatePreferences(data: Partial<ContentPreferences>): Promise<ContentPreferences> {
+  const response = await this.client.put('/preferences/preferences', data)
+  return response.data
+}
+
+// Enhanced Draft Methods
+async regenerateDraft(draftId: string, options: {
+  style?: string
+  preserve_hashtags?: boolean
+}): Promise<PostDraft> {
+  const response = await this.client.post(`/drafts/${draftId}/regenerate`, null, {
+    params: options
+  })
+  return response.data
+}
+
+async batchGenerateDrafts(options: {
+  max_posts?: number
+  min_relevance_score?: number
+  style?: string
+}): Promise<PostDraft[]> {
+  const response = await this.client.post('/drafts/batch-generate', null, {
+    params: options
+  })
+  return response.data
+}
 
   // Health Check
   async healthCheck(): Promise<{ status: string }> {

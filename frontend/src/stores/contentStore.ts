@@ -1,11 +1,14 @@
 import { create } from 'zustand'
-import { api, type ContentItem, type DailySummary } from '@/lib/api'
+import { api, type ContentItem, type DailySummary, type ContentSource } from '@/lib/api'
 
 interface ContentState {
   // Content data
   aiSelectedContent: ContentItem[]
   allContent: ContentItem[]
   dailySummary: DailySummary | null
+  
+  // Sources data
+  contentSources: ContentSource[]
   
   // UI state
   viewMode: 'ai-selected' | 'fresh' | 'trending' | 'all'
@@ -22,6 +25,7 @@ interface ContentActions {
   fetchContentByMode: (mode: 'ai-selected' | 'fresh' | 'trending' | 'all') => Promise<void>
   fetchDailyArticleSummary: (date?: string) => Promise<void>
   runAIContentSelection: () => Promise<void>
+  fetchContentSources: () => Promise<void>
   
   // UI state management
   setViewMode: (mode: 'ai-selected' | 'fresh' | 'trending' | 'all') => void
@@ -31,10 +35,12 @@ interface ContentActions {
   // Data management
   updateAISelection: (content: ContentItem[]) => void
   setDailySummary: (summary: DailySummary) => void
+  setContentSources: (sources: ContentSource[]) => void
   clearError: () => void
   
   // Refresh
   refreshContent: () => Promise<void>
+  refreshSources: () => Promise<void>
 }
 
 type ContentStore = ContentState & ContentActions
@@ -44,6 +50,7 @@ export const useContentStore = create<ContentStore>((set, get) => ({
   aiSelectedContent: [],
   allContent: [],
   dailySummary: null,
+  contentSources: [],
   viewMode: 'ai-selected',
   isLoading: false,
   error: null,
@@ -98,6 +105,15 @@ export const useContentStore = create<ContentStore>((set, get) => ({
     }
   },
 
+  fetchContentSources: async () => {
+    try {
+      const sources = await api.getContentSources()
+      set({ contentSources: sources })
+    } catch (error: any) {
+      console.error('Failed to fetch content sources:', error)
+    }
+  },
+
   setViewMode: (mode) => {
     set({ viewMode: mode })
     // Auto-fetch content when view mode changes
@@ -120,6 +136,10 @@ export const useContentStore = create<ContentStore>((set, get) => ({
     set({ dailySummary: summary })
   },
 
+  setContentSources: (sources) => {
+    set({ contentSources: sources })
+  },
+
   clearError: () => {
     set({ error: null })
   },
@@ -130,6 +150,10 @@ export const useContentStore = create<ContentStore>((set, get) => ({
     if (viewMode === 'ai-selected') {
       await get().fetchDailyArticleSummary()
     }
+  },
+
+  refreshSources: async () => {
+    await get().fetchContentSources()
   },
 }))
 
@@ -145,4 +169,9 @@ export const useContentByMode = (mode: 'ai-selected' | 'fresh' | 'trending' | 'a
 export const useDailyArticleSummary = () => {
   const { dailySummary, isLoading } = useContentStore()
   return { data: dailySummary, isLoading }
+}
+
+export const useContentSources = () => {
+  const { contentSources, isLoading, error } = useContentStore()
+  return { data: contentSources, isLoading, error }
 }

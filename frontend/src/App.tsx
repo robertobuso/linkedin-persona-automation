@@ -16,6 +16,8 @@ import CreationStudio from '@/pages/CreationStudio'
 import EngagementHub from '@/pages/EngagementHub'
 import PersonaAnalytics from '@/pages/PersonaAnalytics'
 import AIConfiguration from '@/pages/AIConfiguration'
+import PreferencesPage from '@/pages/Preferences'
+import SourcesPage from '@/pages/Sources'
 
 // Create a client
 const queryClient = new QueryClient({
@@ -67,6 +69,8 @@ function App() {
                 <Route path="creation" element={<CreationStudio />} />
                 <Route path="engagement" element={<EngagementHub />} />
                 <Route path="analytics" element={<PersonaAnalytics />} />
+                <Route path="sources" element={<SourcesPage />} />
+                <Route path="preferences" element={<PreferencesPage />} />
                 <Route path="settings" element={<AIConfiguration />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Route>

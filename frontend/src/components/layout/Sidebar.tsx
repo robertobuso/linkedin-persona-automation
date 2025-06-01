@@ -8,7 +8,9 @@ import {
   ChartBarIcon,
   CogIcon,
   ChevronLeftIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  RssIcon,
+  AdjustmentsHorizontalIcon
 } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -51,6 +53,18 @@ export function Sidebar() {
       href: '/analytics',
       icon: ChartBarIcon,
       description: 'Persona Analytics'
+    },
+    {
+      name: 'Sources',
+      href: '/sources',
+      icon: RssIcon,
+      description: 'Content Sources'
+    },
+    {
+      name: 'Preferences',
+      href: '/preferences',
+      icon: AdjustmentsHorizontalIcon,
+      description: 'Content Preferences'
     },
     {
       name: 'Settings',

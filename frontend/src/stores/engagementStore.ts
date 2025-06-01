@@ -1,21 +1,5 @@
 import { create } from 'zustand'
-
-// Basic interfaces for engagement
-interface EngagementOpportunity {
-  id: string
-  target_id: string
-  target_content: string
-  target_author: string
-  target_url?: string
-  engagement_type: 'comment' | 'like' | 'share'
-  priority: 'urgent' | 'high' | 'medium' | 'low'
-  status: 'pending' | 'scheduled' | 'completed' | 'failed' | 'skipped'
-  relevance_score?: number
-  context_tags?: string[]
-  engagement_reason?: string
-  suggested_comment?: string
-  created_at: string
-}
+import { api, type EngagementOpportunity, type PostDraft } from '@/lib/api'
 
 interface EngagementStats {
   total_opportunities: number
@@ -27,21 +11,33 @@ interface EngagementStats {
 }
 
 interface EngagementState {
+  // Engagement opportunities
   commentQueue: EngagementOpportunity[]
   highPriorityOpportunities: EngagementOpportunity[]
   allOpportunities: EngagementOpportunity[]
   engagementStats: EngagementStats | null
   automationEnabled: boolean
+  selectedOpportunity: EngagementOpportunity | null
+  
+  // Draft management
+  drafts: PostDraft[]
+  selectedDraft: PostDraft | null
+  draftFilters: {
+    status: string | null
+    searchQuery: string
+  }
+  
+  // UI state
   isLoading: boolean
   error: string | null
-  selectedOpportunity: EngagementOpportunity | null
 }
 
 interface EngagementActions {
+  // Engagement opportunities
   fetchCommentOpportunities: (params?: any) => Promise<void>
   fetchHighPriorityOpportunities: () => Promise<void>
   fetchEngagementStats: (days?: number) => Promise<void>
-  createComment: (data: any) => Promise<void>
+  createComment: (data: { opportunity_id: string; comment_text?: string }) => Promise<void>
   discoverNewPosts: (maxPosts?: number) => Promise<void>
   updateQueue: (opportunities: EngagementOpportunity[]) => void
   removeFromQueue: (opportunityId: string) => void
@@ -49,6 +45,14 @@ interface EngagementActions {
   toggleAutomation: () => void
   setAutomationEnabled: (enabled: boolean) => void
   setSelectedOpportunity: (opportunity: EngagementOpportunity | null) => void
+  
+  // Draft management
+  fetchDrafts: () => Promise<void>
+  setSelectedDraft: (draft: PostDraft | null) => void
+  setDraftFilters: (filters: Partial<EngagementState['draftFilters']>) => void
+  refreshDrafts: () => Promise<void>
+  
+  // Utility
   clearError: () => void
   refreshEngagementData: () => Promise<void>
 }
@@ -62,17 +66,30 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
   allOpportunities: [],
   engagementStats: null,
   automationEnabled: false,
+  selectedOpportunity: null,
+  
+  // Draft state
+  drafts: [],
+  selectedDraft: null,
+  draftFilters: {
+    status: null,
+    searchQuery: ''
+  },
+  
+  // UI state
   isLoading: false,
   error: null,
-  selectedOpportunity: null,
 
-  // Actions (basic implementations to prevent errors)
+  // Engagement Actions
   fetchCommentOpportunities: async (params) => {
     set({ isLoading: true, error: null })
     try {
-      // Mock implementation - replace with real API call
-      const opportunities: EngagementOpportunity[] = []
-      set({ commentQueue: opportunities, allOpportunities: opportunities, isLoading: false })
+      const opportunities = await api.getCommentOpportunities(params)
+      set({ 
+        commentQueue: opportunities, 
+        allOpportunities: opportunities, 
+        isLoading: false 
+      })
     } catch (error: any) {
       set({ isLoading: false, error: error.message })
     }
@@ -80,7 +97,10 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
 
   fetchHighPriorityOpportunities: async () => {
     try {
-      const opportunities: EngagementOpportunity[] = []
+      const opportunities = await api.getCommentOpportunities({ 
+        priority: 'high',
+        limit: 10 
+      })
       set({ highPriorityOpportunities: opportunities })
     } catch (error: any) {
       console.error('Failed to fetch high priority opportunities:', error)
@@ -89,8 +109,9 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
 
   fetchEngagementStats: async (days = 30) => {
     try {
+      // This would need to be implemented in your API
       const stats: EngagementStats = {
-        total_opportunities: 0,
+        total_opportunities: get().allOpportunities.length,
         completion_rate: 0,
         status_breakdown: {},
         type_breakdown: {},
@@ -106,9 +127,10 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
   createComment: async (data) => {
     set({ isLoading: true, error: null })
     try {
-      // Mock implementation
+      await api.createComment(data)
       set((state) => ({
         commentQueue: state.commentQueue.filter((opp) => opp.id !== data.opportunity_id),
+        allOpportunities: state.allOpportunities.filter((opp) => opp.id !== data.opportunity_id),
         isLoading: false,
       }))
     } catch (error: any) {
@@ -120,8 +142,7 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
   discoverNewPosts: async (maxPosts = 50) => {
     set({ isLoading: true, error: null })
     try {
-      // Mock implementation
-      await get().fetchCommentOpportunities()
+      await get().fetchCommentOpportunities({ limit: maxPosts })
       set({ isLoading: false })
     } catch (error: any) {
       set({ isLoading: false, error: error.message })
@@ -159,6 +180,32 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
     set({ selectedOpportunity: opportunity })
   },
 
+  // Draft Actions
+  fetchDrafts: async () => {
+    try {
+      const drafts = await api.getDrafts()
+      set({ drafts })
+    } catch (error: any) {
+      console.error('Failed to fetch drafts:', error)
+      set({ error: error.message })
+    }
+  },
+
+  setSelectedDraft: (draft) => {
+    set({ selectedDraft: draft })
+  },
+
+  setDraftFilters: (filters) => {
+    set(state => ({
+      draftFilters: { ...state.draftFilters, ...filters }
+    }))
+  },
+
+  refreshDrafts: async () => {
+    await get().fetchDrafts()
+  },
+
+  // Utility Actions
   clearError: () => {
     set({ error: null })
   },
@@ -168,17 +215,23 @@ export const useEngagementStore = create<EngagementStore>((set, get) => ({
       get().fetchCommentOpportunities(),
       get().fetchHighPriorityOpportunities(),
       get().fetchEngagementStats(),
+      get().fetchDrafts()
     ])
   },
 }))
 
 // Helper hooks
-export const useEngagementQueue = () => {
-  const { commentQueue, isLoading, error } = useEngagementStore()
-  return { commentQueue, isLoading, error }
+export const useDrafts = () => {
+  const { drafts, isLoading, error } = useEngagementStore()
+  return { data: drafts, isLoading, error }
 }
 
-export const useHighPriorityOpportunities = () => {
-  const { highPriorityOpportunities } = useEngagementStore()
-  return highPriorityOpportunities
+export const useSelectedDraft = () => {
+  const { selectedDraft, setSelectedDraft } = useEngagementStore()
+  return { selectedDraft, setSelectedDraft }
+}
+
+export const useEngagementQueue = () => {
+  const { commentQueue, isLoading, error } = useEngagementStore()
+  return { data: commentQueue, isLoading, error }
 }

@@ -451,6 +451,97 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         except Exception as e:
             logger.error(f"Failed to mark content as LLM selected: {str(e)}")
             return 0
+        
+    async def get_recent_items_from_sources(
+        self,
+        source_ids: List[UUID],
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[ContentItem]:
+        """Get recent content items from specific sources."""
+        stmt = (
+            select(ContentItem)
+            .where(ContentItem.source_id.in_(source_ids))
+            .order_by(ContentItem.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
+    async def get_items_from_sources(
+        self,
+        source_ids: List[UUID],
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[ContentItem]:
+        """Get content items from specific sources."""
+        stmt = (
+            select(ContentItem)
+            .where(ContentItem.source_id.in_(source_ids))
+            .order_by(ContentItem.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
+    async def count_items_by_date_range(
+        self,
+        source_ids: List[UUID],
+        start_date: datetime,
+        end_date: datetime
+    ) -> int:
+        """Count content items in date range."""
+        stmt = (
+            select(func.count(ContentItem.id))
+            .where(
+                ContentItem.source_id.in_(source_ids),
+                ContentItem.created_at >= start_date,
+                ContentItem.created_at < end_date
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+
+    async def count_high_relevance_items_by_date(
+        self,
+        user_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        min_relevance: int = 70
+    ) -> int:
+        """Count high-relevance items by date."""
+        # You'll need to adapt this based on your schema
+        # This assumes you have a way to filter by user and relevance
+        stmt = (
+            select(func.count(ContentItem.id))
+            .where(
+                ContentItem.relevance_score >= min_relevance,
+                ContentItem.created_at >= start_date,
+                ContentItem.created_at < end_date
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+
+    async def get_avg_relevance_score_by_date(
+        self,
+        user_id: UUID,
+        start_date: datetime,
+        end_date: datetime
+    ) -> float:
+        """Get average relevance score for date range."""
+        stmt = (
+            select(func.avg(ContentItem.relevance_score))
+            .where(
+                ContentItem.created_at >= start_date,
+                ContentItem.created_at < end_date,
+                ContentItem.relevance_score.isnot(None)
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0.0
 
 class PostDraftRepository(BaseRepository[PostDraft]):
     """Repository for PostDraft model with draft management and scheduling operations."""

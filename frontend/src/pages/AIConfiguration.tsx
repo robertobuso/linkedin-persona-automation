@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { Card } from '@/components/ui/Card'
+import { LinkedInConnectionCard } from '@/components/settings/LinkedInConnectionCard'
 import { Button } from '@/components/ui/Button'
+import { useNavigate } from 'react-router-dom'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Switch } from '@headlessui/react'
@@ -9,12 +11,18 @@ import {
   CogIcon, 
   SparklesIcon,
   ClockIcon,
-  ChatBubbleLeftIcon 
+  ChatBubbleLeftIcon,
+  UserIcon,
+  LinkIcon,
+  RssIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline'
 import { cn } from '@/utils/cn'
 import { notify } from '@/stores/uiStore'
 
 export default function AIConfiguration() {
+  const navigate = useNavigate() // ADD THIS
+
   const [settings, setSettings] = useState({
     contentSelection: {
       enabled: true,
@@ -49,7 +57,7 @@ export default function AIConfiguration() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header - REMOVE LinkedIn from here */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-neural-700">AI Configuration</h1>
@@ -62,6 +70,65 @@ export default function AIConfiguration() {
         </Button>
       </div>
 
+      {/* ADD THIS: LinkedIn Connection Section */}
+      <Card intelligence>
+        <div className="p-6">
+          <div className="flex items-center space-x-3 mb-4">
+            <LinkIcon className="h-6 w-6 text-ai-purple-600" />
+            <h2 className="text-xl font-semibold text-neural-700">LinkedIn Integration</h2>
+          </div>
+          <LinkedInConnectionCard />
+        </div>
+      </Card>
+
+      {/* ADD THIS: Quick Access Section */}
+      <Card intelligence>
+        <div className="p-6">
+          <div className="flex items-center space-x-3 mb-4">
+            <CogIcon className="h-6 w-6 text-neural-600" />
+            <h2 className="text-xl font-semibold text-neural-700">Quick Configuration</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex items-center space-x-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 bg-gradient-to-r from-ai-purple-100 to-ml-green-100 rounded-lg flex items-center justify-center">
+                <UserIcon className="h-5 w-5 text-ai-purple-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-medium text-neural-700">Content Preferences</h3>
+                <p className="text-sm text-gray-600">Configure what content you want to discover</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/preferences')}
+              >
+                Configure
+              </Button>
+            </div>
+            
+            <div className="flex items-center space-x-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 bg-gradient-to-r from-ml-green-100 to-prediction-100 rounded-lg flex items-center justify-center">
+                <RssIcon className="h-5 w-5 text-ml-green-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-medium text-neural-700">Content Sources</h3>
+                <p className="text-sm text-gray-600">Manage your RSS feeds and content sources</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/sources')}
+              >
+                Manage
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* KEEP ALL YOUR EXISTING CARDS EXACTLY AS THEY ARE */}
+      
       {/* Content Selection Settings */}
       <Card intelligence>
         <div className="p-6">
