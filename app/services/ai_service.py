@@ -247,8 +247,11 @@ class AIService:
                 max_length=request.max_length or 200
             )
 
+            # Use style-aware system prompt
+            system_prompt = post_prompts.get_system_prompt(request.style)
+
             messages = [
-                SystemMessage(content=self.summarization_prompts.get_system_prompt()),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content=prompt)
             ]
 

@@ -5,6 +5,7 @@ import { PerformanceCard } from '@/components/dashboard/PerformanceCard'
 import { QuickActionsPanel } from '@/components/dashboard/QuickActionsPanel'
 import { TodaysContentIntelligence } from '@/components/dashboard/TodaysContentIntelligence'
 import { EngagementOpportunities } from '@/components/dashboard/EngagementOpportunities'
+import { RecommendedDraft } from '@/components/dashboard/RecommendedDraft'
 import { DailyArticleSummary } from '@/components/dashboard/DailyArticleSummary'
 import { LoadingPage } from '@/components/ui/LoadingStates'
 
@@ -60,10 +61,11 @@ export default function Dashboard() {
       <QuickActionsPanel />
 
       {/* Today's Priorities */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <TodaysContentIntelligence content={todaysContent} loading={contentLoading} />
-        <EngagementOpportunities opportunities={engagementQueue} loading={engagementLoading} />
-      </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <TodaysContentIntelligence content={todaysContent} loading={contentLoading} />
+          <EngagementOpportunities opportunities={engagementQueue} loading={engagementLoading} />
+          <RecommendedDraft />
+        </div>
 
       {/* Daily Article Summary */}
       <DailyArticleSummary />

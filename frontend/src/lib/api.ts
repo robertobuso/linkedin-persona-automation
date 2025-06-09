@@ -1,4 +1,3 @@
-// frontend/src/lib/api.ts
 import axios, { AxiosInstance, AxiosError } from 'axios'
 
 // Types
@@ -57,6 +56,16 @@ export interface PostDraft {
   linkedin_post_id?: string
   linkedin_post_url?: string
   created_at: string
+  updated_at?: string
+  generation_metadata?: any
+  ai_model_used?: string
+}
+
+// Enhanced Draft interface
+export interface DraftWithContent extends PostDraft {
+  updated_at: string
+  generation_metadata?: any
+  ai_model_used?: string
 }
 
 export interface EngagementOpportunity {
@@ -199,36 +208,6 @@ export interface ContentPreferences {
   updated_at: string
 }
 
-export interface DraftWithContent {
-  id: string
-  user_id: string
-  content: string
-  hashtags: string[]
-  title?: string
-  status: string
-  scheduled_for?: string
-  published_at?: string
-  linkedin_post_id?: string
-  linkedin_post_url?: string
-  created_at: string
-  updated_at: string
-  generation_metadata?: any
-  ai_model_used?: string
-}
-
-export interface DraftRegenerateRequest {
-  tone_style: string
-  preserve_hashtags: boolean
-}
-
-export interface DraftRegenerateResponse {
-  draft: DraftWithContent
-  tone_style: string
-  regenerated_at: string
-  success: boolean
-  message: string
-}
-
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -261,7 +240,6 @@ class APIClient {
       (response) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
-          // Token expired or invalid
           localStorage.removeItem('token')
           window.location.href = '/login'
         }
@@ -273,7 +251,7 @@ class APIClient {
   // Authentication
   async login(email: string, password: string): Promise<LoginResponse> {
     const formData = new FormData()
-    formData.append('username', email) // OAuth2 expects 'username' field
+    formData.append('username', email)
     formData.append('password', password)
 
     const response = await this.client.post('/auth/login', formData, {
@@ -298,24 +276,17 @@ class APIClient {
     return response.data
   }
 
-  async refreshToken(refreshToken: string): Promise<LoginResponse> {
-    const response = await this.client.post('/auth/refresh', {
-      refresh_token: refreshToken,
-    })
-    return response.data
-  }
-
   // Content Management
-async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Promise<ContentItem[]> {
-  const response = await this.client.get('/content/content-by-mode', {  // ✅ THIS IS CORRECT
-    params: { 
-      mode,
-      limit: 50,
-      offset: 0 
-    }
-  })
-  return response.data || []
-}
+  async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Promise<ContentItem[]> {
+    const response = await this.client.get('/content/content-by-mode', {
+      params: { 
+        mode,
+        limit: 50,
+        offset: 0 
+      }
+    })
+    return response.data || []
+  }
 
   async getDailyArticleSummary(date?: string): Promise<DailySummary> {
     const response = await this.client.get('/content/daily-summary', {
@@ -329,10 +300,15 @@ async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Prom
     return response.data
   }
 
-  // Draft Management
+  // Draft Management - CONSOLIDATED METHODS
   async getDrafts(): Promise<PostDraft[]> {
     const response = await this.client.get('/drafts')
     return response.data.items || response.data
+  }
+
+  async getAllUserDrafts(): Promise<DraftWithContent[]> {
+    const response = await this.client.get('/drafts/all')
+    return response.data
   }
 
   async generateDraft(contentId: string): Promise<PostDraft> {
@@ -342,9 +318,21 @@ async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Prom
     return response.data
   }
 
+  async generateDraftFromContent(contentItemId: string, toneStyle: string): Promise<DraftWithContent> {
+    const response = await this.client.post('/drafts/generate-from-content', {
+      content_item_id: contentItemId,
+      tone_style: toneStyle
+    })
+    return response.data
+  }
+
   async updateDraft(draftId: string, data: Partial<PostDraft>): Promise<PostDraft> {
     const response = await this.client.put(`/drafts/${draftId}`, data)
     return response.data
+  }
+
+  async deleteDraft(draftId: string): Promise<void> {
+    await this.client.delete(`/drafts/${draftId}`)
   }
 
   async publishDraft(draftId: string, scheduledFor?: string): Promise<any> {
@@ -352,6 +340,34 @@ async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Prom
       scheduled_time: scheduledFor,
     })
     return response.data
+  }
+
+  async regenerateDraft(draftId: string, options: {
+    tone_style?: string
+    preserve_hashtags?: boolean
+  }): Promise<DraftWithContent> {
+    const response = await this.client.post(`/drafts/${draftId}/regenerate`, options)
+    return response.data.draft || response.data
+  }
+
+  async batchGenerateDrafts(options: {
+    max_posts?: number
+    min_relevance_score?: number
+    style?: string
+  }): Promise<DraftWithContent[]> {
+    const response = await this.client.post('/drafts/batch-generate', null, {
+      params: options
+    })
+    return response.data
+  }
+
+  async getToneStyles(): Promise<Array<{value: string, label: string, description: string}>> {
+    return [
+      { value: 'professional', label: 'Professional', description: 'Formal, business-focused tone' },
+      { value: 'conversational', label: 'Conversational', description: 'Friendly, approachable tone' },
+      { value: 'storytelling', label: 'Storytelling', description: 'Narrative-driven, engaging tone' },
+      { value: 'humorous', label: 'Humorous', description: 'Light-hearted, entertaining tone' }
+    ]
   }
 
   // AI Recommendations
@@ -403,151 +419,82 @@ async getContentByMode(mode: 'ai-selected' | 'fresh' | 'trending' | 'all'): Prom
     return response.data
   }
 
-// LinkedIn Connection
-async getLinkedInStatus(): Promise<LinkedInStatus> {
-  const response = await this.client.get('/auth/linkedin/status')
-  return response.data
-}
-
-async connectLinkedIn(): Promise<{ authorization_url: string; state: string; message: string }> {
-  const response = await this.client.get('/auth/linkedin/connect')
-  return response.data
-}
-
-async disconnectLinkedIn(): Promise<{ message: string }> {
-  const response = await this.client.delete('/auth/linkedin/disconnect')
-  return response.data
-}
-
-// Content Sources Management
-async getContentSources(): Promise<ContentSource[]> {
-  const response = await this.client.get('/content/sources')
-  return response.data
-}
-
-async createContentSource(data: {
-  name: string
-  source_type: string
-  url?: string
-  description?: string
-  is_active?: boolean
-  check_frequency_hours?: number
-}): Promise<ContentSource> {
-  const response = await this.client.post('/content/sources', data)
-  return response.data
-}
-
-async updateContentSource(id: string, data: Partial<ContentSource>): Promise<ContentSource> {
-  const response = await this.client.put(`/content/sources/${id}`, data)
-  return response.data
-}
-
-async deleteContentSource(id: string): Promise<void> {
-  await this.client.delete(`/content/sources/${id}`)
-}
-
-async validateFeedUrl(url: string): Promise<{
-  valid: boolean
-  title?: string
-  description?: string
-  entry_count?: number
-  error?: string
-}> {
-  const response = await this.client.post('/content/validate-feed', { url })
-  return response.data
-}
-
-// Content Preferences
-async getUserPreferences(): Promise<ContentPreferences> {
-  const response = await this.client.get('/preferences/preferences')
-  return response.data
-}
-
-async saveQuickPreferences(data: {
-  jobRole: string
-  industry: string
-  interests: string[]
-  customPrompt: string
-  relevanceThreshold: number
-  maxArticlesPerDay: number
-}): Promise<ContentPreferences> {
-  const response = await this.client.post('/preferences/quick-setup', data)
-  return response.data
-}
-
-async updatePreferences(data: Partial<ContentPreferences>): Promise<ContentPreferences> {
-  const response = await this.client.put('/preferences/preferences', data)
-  return response.data
-}
-
-// Enhanced Draft Methods
-async regenerateDraft(draftId: string, options: {
-  style?: string
-  preserve_hashtags?: boolean
-}): Promise<PostDraft> {
-  const response = await this.client.post(`/drafts/${draftId}/regenerate`, null, {
-    params: options
-  })
-  return response.data
-}
-
-  async batchGenerateDrafts(options: {
-    max_posts?: number
-    min_relevance_score?: number
-    style?: string
-  }): Promise<PostDraft[]> {
-    const response = await this.client.post('/drafts/batch-generate', null, {
-      params: options
-    })
+  // LinkedIn Connection
+  async getLinkedInStatus(): Promise<LinkedInStatus> {
+    const response = await this.client.get('/auth/linkedin/status')
     return response.data
   }
 
-  async getAllUserDrafts(): Promise<DraftWithContent[]> {
-    const response = await this.client.get('/drafts/all')
+  async connectLinkedIn(): Promise<{ authorization_url: string; state: string; message: string }> {
+    const response = await this.client.get('/auth/linkedin/connect')
     return response.data
   }
 
-  async generateDraftFromContent(contentItemId: string, toneStyle: string): Promise<DraftWithContent> {
-    const response = await this.client.post('/drafts/generate-from-content', {
-      content_item_id: contentItemId,
-      tone_style: toneStyle
-    })
+  async disconnectLinkedIn(): Promise<{ message: string }> {
+    const response = await this.client.delete('/auth/linkedin/disconnect')
     return response.data
   }
 
-  async regenerateDraft(draftId: string, options: {
-    tone_style?: string
-    preserve_hashtags?: boolean
-  }): Promise<DraftRegenerateResponse> {
-    const response = await this.client.post(`/drafts/${draftId}/regenerate`, options)
+  // Content Sources Management
+  async getContentSources(): Promise<ContentSource[]> {
+    const response = await this.client.get('/content/sources')
     return response.data
   }
 
-  async batchGenerateDrafts(options: {
-    max_posts?: number
-    min_relevance_score?: number
-    style?: string
-  }): Promise<DraftWithContent[]> {
-    const response = await this.client.post('/drafts/batch-generate', null, {
-      params: options
-    })
+  async createContentSource(data: {
+    name: string
+    source_type: string
+    url?: string
+    description?: string
+    is_active?: boolean
+    check_frequency_hours?: number
+  }): Promise<ContentSource> {
+    const response = await this.client.post('/content/sources', data)
     return response.data
   }
 
-  async deleteDraft(draftId: string): Promise<void> {
-    await this.client.delete(`/drafts/${draftId}`)
-  }
-
-  async getToneStyles(): Promise<Array<{value: string, label: string, description: string}>> {
-    const response = await this.client.get('/drafts/tone-styles')
+  async updateContentSource(id: string, data: Partial<ContentSource>): Promise<ContentSource> {
+    const response = await this.client.put(`/content/sources/${id}`, data)
     return response.data
   }
 
-  async getContentWithDraftStatus(): Promise<Array<ContentItem & {draft_generated: boolean}>> {
-    const response = await this.client.get('/content/with-draft-status')
+  async deleteContentSource(id: string): Promise<void> {
+    await this.client.delete(`/content/sources/${id}`)
+  }
+
+  async validateFeedUrl(url: string): Promise<{
+    valid: boolean
+    title?: string
+    description?: string
+    entry_count?: number
+    error?: string
+  }> {
+    const response = await this.client.post('/content/validate-feed', { url })
     return response.data
   }
 
+  // Content Preferences
+  async getUserPreferences(): Promise<ContentPreferences> {
+    const response = await this.client.get('/preferences/preferences')
+    return response.data
+  }
+
+  async saveQuickPreferences(data: {
+    jobRole: string
+    industry: string
+    interests: string[]
+    customPrompt: string
+    relevanceThreshold: number
+    maxArticlesPerDay: number
+  }): Promise<ContentPreferences> {
+    const response = await this.client.post('/preferences/quick-setup', data)
+    return response.data
+  }
+
+  async updatePreferences(data: Partial<ContentPreferences>): Promise<ContentPreferences> {
+    const response = await this.client.put('/preferences/preferences', data)
+    return response.data
+  }
 
   // Health Check
   async healthCheck(): Promise<{ status: string }> {

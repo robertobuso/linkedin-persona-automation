@@ -1,30 +1,83 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, DraftWithContent } from '@/lib/api'
 import { notify } from '@/stores/uiStore'
 
+// Get all drafts
 export function useDrafts() {
   return useQuery({
-    queryKey: ['drafts'],
-    queryFn: () => api.getDrafts(),
-    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
+    queryKey: ['drafts', 'all'],
+    queryFn: () => api.getAllUserDrafts(),
+    refetchInterval: 30 * 1000, // Refresh every 30 seconds for real-time updates
+    refetchOnWindowFocus: true,
   })
 }
 
+// Generate new draft from content
 export function useGenerateDraft() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (contentId: string) => api.generateDraft(contentId),
-    onSuccess: () => {
+    mutationFn: ({ content_item_id, tone_style }: { 
+      content_item_id: string
+      tone_style: string 
+    }) => api.generateDraftFromContent(content_item_id, tone_style),
+    onSuccess: (newDraft) => {
+      // Update drafts list immediately
       queryClient.invalidateQueries({ queryKey: ['drafts'] })
-      queryClient.invalidateQueries({ queryKey: ['draft-recommendations'] })
+      // Also update content list to show draft_generated status
+      queryClient.invalidateQueries({ queryKey: ['content'] })
+      
+      return newDraft
     },
     onError: (error: any) => {
-      notify.error('Generation Failed', error.message || 'Failed to generate draft')
+      if (error.status === 409) {
+        notify.warning('Draft already generated for this content')
+      } else {
+        notify.error('Generation Failed', error.message || 'Failed to generate draft')
+      }
     }
   })
 }
 
+// Regenerate existing draft
+export function useRegenerateDraft() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: ({ draftId, options }: { 
+      draftId: string
+      options: { tone_style?: string; preserve_hashtags?: boolean }
+    }) => api.regenerateDraft(draftId, options),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drafts'] })
+    },
+    onError: (error: any) => {
+      notify.error('Failed to regenerate draft', error.message)
+    }
+  })
+}
+
+// Batch generate drafts
+export function useBatchGenerateDrafts() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (options: {
+      max_posts?: number
+      min_relevance_score?: number
+      style?: string
+    }) => api.batchGenerateDrafts(options),
+    onSuccess: (drafts) => {
+      queryClient.invalidateQueries({ queryKey: ['drafts'] })
+      queryClient.invalidateQueries({ queryKey: ['content'] })
+    },
+    onError: (error: any) => {
+      notify.error('Batch generation failed', error.message)
+    }
+  })
+}
+
+// Update draft
 export function useUpdateDraft() {
   const queryClient = useQueryClient()
   
@@ -33,11 +86,11 @@ export function useUpdateDraft() {
       api.updateDraft(draftId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drafts'] })
-      queryClient.invalidateQueries({ queryKey: ['draft-recommendations'] })
     }
   })
 }
 
+// Publish draft
 export function usePublishDraft() {
   const queryClient = useQueryClient()
   
@@ -53,3 +106,91 @@ export function usePublishDraft() {
     }
   })
 }
+
+// Delete draft
+export function useDeleteDraft() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (draftId: string) => api.deleteDraft(draftId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drafts'] })
+    },
+    onError: (error: any) => {
+      notify.error('Failed to delete draft', error.message)
+    }
+  })
+}
+
+// Get tone styles
+export function useToneStyles() {
+  return useQuery({
+    queryKey: ['tone-styles'],
+    queryFn: () => api.getToneStyles(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+// frontend/src/hooks/useAIRecommendations.ts - UPDATED VERSION
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
+
+export function useAIRecommendations() {
+  return useQuery({
+    queryKey: ['ai-recommendations'],
+    queryFn: () => api.getAIRecommendations({
+      includeConfidence: true,
+      includeReasoning: true,
+      limit: 10
+    }),
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
+    staleTime: 2 * 60 * 1000, // Consider fresh for 2 minutes
+  })
+}
+
+export function usePersonaMetrics(days: number = 30) {
+  return useQuery({
+    queryKey: ['persona-metrics', days],
+    queryFn: () => api.getPersonaMetrics(days),
+    refetchInterval: 15 * 60 * 1000, // Refresh every 15 minutes
+  })
+}
+
+export function useDraftRecommendations() {
+  return useQuery({
+    queryKey: ['draft-recommendations'],
+    queryFn: () => api.getDraftRecommendations(),
+    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
+  })
+}
+
+export function useEngagementPrediction(draftId: string) {
+  return useQuery({
+    queryKey: ['engagement-prediction', draftId],
+    queryFn: () => api.getEngagementPrediction(draftId),
+    enabled: !!draftId,
+    staleTime: 10 * 60 * 1000, // Predictions valid for 10 minutes
+  })
+}
+
+export function useTodaysContent() {
+  return useQuery({
+    queryKey: ['todays-content'],
+    queryFn: () => api.getContentByMode('ai-selected'),
+    refetchInterval: 30 * 60 * 1000, // Refresh every 30 minutes
+  })
+}
+
+export function useEngagementQueue() {
+  return useQuery({
+    queryKey: ['engagement-queue'],
+    queryFn: () => api.getCommentOpportunities({
+      limit: 20,
+      status: 'pending'
+    }),
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
+  })
+}
+
+// Export the consolidated useDrafts for compatibility
+// export { useDrafts } from './useDrafts'

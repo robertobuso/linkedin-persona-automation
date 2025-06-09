@@ -86,7 +86,7 @@ export function EnhancedDraftCard({
     }
   }
 
-  const shouldTruncateContent = !isExpanded && draft.content.length > 400
+  const shouldTruncateContent = !showFullContent && !isExpanded && draft.content.length > 400
   const displayContent = shouldTruncateContent 
     ? draft.content.substring(0, 400) + '...'
     : draft.content
@@ -119,27 +119,27 @@ export function EnhancedDraftCard({
               {displayContent}
             </div>
             
-            {draft.content.length > 400 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsExpanded(!isExpanded)
-                }}
-                className="mt-2 text-sm text-neural-600 hover:text-neural-800 flex items-center space-x-1"
-              >
-                {isExpanded ? (
-                  <>
-                    <EyeSlashIcon className="h-4 w-4" />
-                    <span>Show less</span>
-                  </>
-                ) : (
-                  <>
-                    <EyeIcon className="h-4 w-4" />
-                    <span>Show more</span>
-                  </>
-                )}
-              </button>
-            )}
+            {!showFullContent && draft.content.length > 400 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsExpanded(!isExpanded)
+              }}
+              className="mt-2 text-sm text-neural-600 hover:text-neural-800 flex items-center space-x-1"
+            >
+              {isExpanded ? (
+                <>
+                  <EyeSlashIcon className="h-4 w-4" />
+                  <span>Show less</span>
+                </>
+              ) : (
+                <>
+                  <EyeIcon className="h-4 w-4" />
+                  <span>Show more</span>
+                </>
+              )}
+            </button>
+          )}
           </div>
 
           {/* Hashtags */}

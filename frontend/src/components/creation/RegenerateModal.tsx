@@ -33,22 +33,40 @@ export function RegenerateModal({
       icon: '💼'
     },
     {
-      value: 'conversational',
+      value: 'conversational', 
       label: 'Conversational',
       description: 'Friendly, approachable tone',
       icon: '💬'
     },
     {
       value: 'storytelling',
-      label: 'Storytelling',
+      label: 'Storytelling', 
       description: 'Narrative-driven, engaging tone',
       icon: '📖'
     },
     {
       value: 'humorous',
       label: 'Humorous',
-      description: 'Light-hearted, entertaining tone',
+      description: 'Light-hearted, entertaining tone', 
       icon: '😄'
+    },
+    {
+      value: 'thought_leadership',
+      label: 'Thought Leadership',
+      description: 'Expert insights and industry analysis',
+      icon: '🧠'
+    },
+    {
+      value: 'educational',
+      label: 'Educational', 
+      description: 'Teaching and instructional content',
+      icon: '📚'
+    },
+    {
+      value: 'engagement_optimized',
+      label: 'Engagement Optimized',
+      description: 'Designed to maximize interaction',
+      icon: '🎯'
     }
   ]
 

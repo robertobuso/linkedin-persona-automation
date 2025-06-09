@@ -637,46 +637,112 @@ Pay close attention to word count, hashtag count, and the structure of 'call_to_
             return post_json
 
 
-    def get_system_prompt(self) -> str:
-        """Get the system prompt for post generation."""
-        return self.system_prompt
+    def get_system_prompt(self, style: Optional[str] = None) -> str:
+        """Get the system prompt for post generation with style adaptation."""
+        return self._build_system_prompt(style)
 
-    def _build_system_prompt(self) -> str:
-        """Build the system prompt for post generation."""
-        # This method was already complete in the provided snippet
-        return """You are an expert LinkedIn thought leader and content strategist. Your mission is to craft compelling, insightful, and provocative posts that establish the user as a forward-thinker in their domain, optimized for LinkedIn's 2025 feed.
+    def _build_system_prompt(self, style: Optional[str] = None) -> str:
+        """Build the system prompt for post generation with style-specific adaptation."""
+        
+        # Base mission and goals
+        base_mission = """You are an expert LinkedIn content strategist. Your mission is to craft compelling, engaging posts optimized for LinkedIn's 2025 feed."""
+        
+        # Style-specific adaptations
+        style_adaptations = {
+            "humorous": {
+                "mission": "You specialize in professional humor that entertains while delivering value, making content memorable and shareable.",
+                "characteristics": [
+                    "Witty & Professional: Use appropriate humor, clever observations, and light irony.",
+                    "Entertaining yet Valuable: Deliver insights through an entertaining lens without sacrificing professionalism.",
+                    "Memorable: Create content that sticks with readers through clever turns of phrase or amusing observations."
+                ],
+                "tone": "Light-hearted yet professional: Use wit and clever observations while maintaining credibility and value."
+            },
+            "casual": {
+                "mission": "You create approachable, conversational content that feels like advice from a trusted colleague.",
+                "characteristics": [
+                    "Approachable & Relatable: Use conversational language and relatable examples.",
+                    "Personal touch: Share experiences or observations that readers can connect with.",
+                    "Friendly authority: Be knowledgeable but not intimidating."
+                ],
+                "tone": "Friendly and conversational: Speak like a knowledgeable colleague sharing insights over coffee."
+            },
+            "storytelling": {
+                "mission": "You craft narrative-driven content that teaches through compelling stories and experiences.",
+                "characteristics": [
+                    "Narrative-driven: Weave insights into compelling stories with clear beginnings, middles, and ends.",
+                    "Experiential learning: Use specific situations and outcomes to illustrate broader principles.",
+                    "Emotionally engaging: Connect with readers through relatable human experiences."
+                ],
+                "tone": "Engaging storyteller: Draw readers into narratives that reveal deeper professional insights."
+            },
+            "educational": {
+                "mission": "You create instructional content that clearly teaches concepts and provides actionable guidance.",
+                "characteristics": [
+                    "Clear & Instructional: Break down complex topics into digestible, actionable steps.",
+                    "Practical focus: Emphasize how readers can immediately apply the insights.",
+                    "Structured learning: Present information in logical, easy-to-follow sequences."
+                ],
+                "tone": "Knowledgeable teacher: Share expertise in a clear, structured way that empowers readers to take action."
+            },
+            "thought_leadership": {
+                "mission": "You establish thought leadership through expert insights, industry analysis, and forward-thinking perspectives.",
+                "characteristics": [
+                    "Expert authority: Demonstrate deep industry knowledge and strategic thinking.",
+                    "Forward-thinking: Offer predictions, trends analysis, and strategic insights.",
+                    "Influential perspective: Challenge conventional thinking with well-supported arguments."
+                ],
+                "tone": "Authoritative expert: Share insights as a recognized leader in your field with confidence and strategic vision."
+            }
+        }
+        
+        # Get style-specific adaptations or use default
+        if style in style_adaptations:
+            adaptation = style_adaptations[style]
+            mission_text = f"{base_mission} {adaptation['mission']}"
+            characteristics_text = "\n".join([f"- {char}" for char in adaptation['characteristics']])
+            tone_instruction = adaptation['tone']
+        else:
+            # Default to professional thought leader
+            mission_text = f"{base_mission} You establish thought leadership through expert insights and forward-thinking perspectives."
+            characteristics_text = """- Insightful & Data-backed: Goes beyond the surface with deeper meaning and data support.
+    - Contrarian/Non-obvious: Challenges assumptions or offers fresh perspectives.
+    - Value-driven: Every post must offer clear value to the target audience.
+    - Authentic: Reflect the user's specified tone and writing style."""
+            tone_instruction = "Conversational yet authoritative: Speak like a knowledgeable peer sharing a significant realization."
 
-Your primary goals are:
-1. To generate posts that follow the "Hook -> Value -> Connect" arc, grab attention quickly, deliver fresh insight, and invite focused discussion.
-2. To transform content summaries into unique, insightful pieces, not just rephrased summaries. Emphasize data-backed insights and non-obvious angles. If a specific statistic is provided, it MUST be incorporated.
-3. To identify and highlight core tensions, contrarian viewpoints, or provocative angles within the source material.
-4. To match the user's authentic communication style and tone preferences, making the AI-generated content feel personal. Vary diction based on personality traits as guided.
-5. To optimize posts for LinkedIn by incorporating 2-3 relevant hashtags, encouraging focused engagement with a single role-aligned question, and ensuring professional value.
+        return f"""{mission_text}
 
-Key Characteristics of Your Output:
-- Hook-driven: Starts strong to capture attention immediately.
-- Insightful & Data-backed: Goes beyond the surface. What's the deeper meaning, supported by data (either provided or generated)?
-- Contrarian/Non-obvious: Challenges assumptions or offers a fresh perspective.
-- Value-driven: Every post must offer clear value to the target audience.
-- Authentic: Reflect the user's specified tone and writing style.
-- Conversational yet authoritative: Speak like a knowledgeable peer sharing a significant realization.
+    Your primary goals are:
+    1. To generate posts that follow the "Hook -> Value -> Connect" arc, grab attention quickly, deliver fresh insight, and invite focused discussion.
+    2. To transform content summaries into unique, insightful pieces, not just rephrased summaries. Emphasize data-backed insights and non-obvious angles. If a specific statistic is provided, it MUST be incorporated.
+    3. To identify and highlight core tensions, contrarian viewpoints, or provocative angles within the source material.
+    4. To match the user's authentic communication style and tone preferences, making the AI-generated content feel personal. Vary diction based on personality traits as guided.
+    5. To optimize posts for LinkedIn by incorporating 2-3 relevant hashtags, encouraging focused engagement with a single role-aligned question, and ensuring professional value.
 
-LinkedIn Best Practices (2025 Algorithm):
-- Adhere to Hook-Value-Connect structure.
-- Aim for posts around 250-350 words for optimal dwell-time.
-- Use line breaks and white space for excellent readability.
-- Strategically include 2-3 highly relevant hashtags (ONLY in the 'hashtags' array).
-- End with a single, focused, role-aligned question to invite discussion.
-- Attribute sources if distinctive phrasing/imagery is reused, or when including a provided stat with a source.
+    Key Characteristics of Your Output:
+    {characteristics_text}
+    - Hook-driven: Starts strong to capture attention immediately.
 
-Output Format:
-Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
-{
-  "content": "The complete LinkedIn post text, crafted with the above principles. Adhere to 250-350 words. **IMPORTANT: Do NOT include hashtags within this content string itself.** They should ONLY be in the 'hashtags' array. If instructed to include a general source line, it should be the last line of this content.",
-  "hashtags": ["#relevantHashtag1", "#relevantHashtag2"],
-  "engagement_hooks": ["The single, focused, role-aligned question used in the post, matching the 'call_to_action'."],
-  "call_to_action": "The single, focused, role-aligned question from the post's CONNECT section. Must end with a single question mark."
-}"""
+    Style & Tone:
+    {tone_instruction}
+
+    LinkedIn Best Practices (2025 Algorithm):
+    - Adhere to Hook-Value-Connect structure.
+    - Aim for posts around 250-350 words for optimal dwell-time.
+    - Use line breaks and white space for excellent readability.
+    - Strategically include 2-3 highly relevant hashtags (ONLY in the 'hashtags' array).
+    - End with a single, focused, role-aligned question to invite discussion.
+    - Attribute sources if distinctive phrasing/imagery is reused, or when including a provided stat with a source.
+
+    Output Format:
+    Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
+    {{
+    "content": "The complete LinkedIn post text, crafted with the above principles. Adhere to 250-350 words. **IMPORTANT: Do NOT include hashtags within this content string itself.** They should ONLY be in the 'hashtags' array. If instructed to include a general source line, it should be the last line of this content.",
+    "hashtags": ["#relevantHashtag1", "#relevantHashtag2"],
+    "engagement_hooks": ["The single, focused, role-aligned question used in the post, matching the 'call_to_action'."],
+    "call_to_action": "The single, focused, role-aligned question from the post's CONNECT section. Must end with a single question mark."
+    }}"""
 
     # BACKWARDS COMPATIBLE METHODS - these maintain the old signatures
 
@@ -1248,33 +1314,47 @@ Style: Professional Thought Leader (Conversational & Insightful)
 
     def create_ai_service_wrapper(self, ai_service_instance):
         """Create a wrapper function for use with generate_post_with_retry."""
-        # This method assumes an `ai_service_instance` with a specific method signature.
-        # For standalone testing, this might need a mock.
         def wrapper(prompt: str) -> str:
             """Wrapper function that calls AI service and returns raw response."""
             try:
-                # This part is specific to how the AI service is called.
-                # Assuming the ai_service_instance has a method like _invoke_llm_with_fallback
-                # and uses LangChain messages.
-                from langchain.schema import SystemMessage, HumanMessage # Ensure LangChain is available or mock
+                # Import here to avoid circular imports
+                from langchain.schema import SystemMessage, HumanMessage
+                import asyncio
 
                 messages = [
                     SystemMessage(content=self.get_system_prompt()),
                     HumanMessage(content=prompt)
                 ]
 
-                # Use the AI service's internal method for LLM calls
-                response_text, _ = ai_service_instance._invoke_llm_with_fallback( # Assuming it returns (text, metrics)
-                    messages=messages,
-                    # max_tokens=800, # Increased for potentially longer repair prompts
-                    # temperature=0.5  # Potentially lower temp for repair for more determinism
-                )
+                # 🔧 FIX: Run the async method in a sync context
+                async def _async_call():
+                    return await ai_service_instance._invoke_llm_with_fallback(
+                        messages=messages,
+                        max_tokens=800,
+                        temperature=0.5
+                    )
+
+                # Run the async function and get the result
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # If we're already in an async context, we need to use a different approach
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, _async_call())
+                            response_text, _ = future.result()
+                    else:
+                        response_text, _ = loop.run_until_complete(_async_call())
+                except RuntimeError:
+                    # No event loop running, safe to use asyncio.run
+                    response_text, _ = asyncio.run(_async_call())
 
                 return response_text
 
             except Exception as e:
                 logger.error(f"AI service wrapper error: {e}")
-                raise # Re-raise the exception to be caught by generate_post_with_retry
+                raise
 
         return wrapper
 

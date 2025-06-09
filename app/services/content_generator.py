@@ -170,53 +170,35 @@ class ContentGenerator:
                         if attempt < 2:  # Not last attempt
                             # Enhance prompt for next attempt
                             if word_count < 250:
-                                # Calculate how much more content we need
                                 words_needed = 250 - word_count
-                                
-                                # AGGRESSIVE prompt enhancement - completely restructure the prompt
                                 prompt_text = f"""
-                            URGENT REQUIREMENT: You previously generated only {word_count} words but you MUST generate at least 250 words.
+                        CRITICAL WORD COUNT REQUIREMENT: You MUST write exactly 250-350 words. Your previous attempt was only {word_count} words.
 
-                            Your response was too brief. You need to add {words_needed} more words to meet the minimum requirement.
+                        MANDATORY STRUCTURE:
+                        1. Hook (20-30 words): Start with an attention-grabbing question or statistic
+                        2. Core Insight (180-250 words): Deep analysis with specific examples, data points, and implications
+                        3. Connect (30-50 words): Personal reflection or call-to-action
 
-                            MANDATORY STRUCTURE for the CORE INSIGHT section (this is where you need to expand):
+                        CONTENT TO EXPAND: {summary_text}
 
-                            1. START with the statistic: "A significant 73% of executives believe AI will fundamentally reshape their industry within the next 3 years [PwC Global AI Study, 2024]."
+                        SPECIFIC INSTRUCTIONS:
+                        - Write in complete paragraphs with detailed explanations
+                        - Include specific examples, statistics, or case studies
+                        - Add industry context and implications
+                        - Use transitional phrases to connect ideas
+                        - Ensure the total word count is between 250-350 words
 
-                            2. ADD specific examples and case studies:
-                            - Mention specific cancer types (breast, lung, skin cancer detection)
-                            - Include specific time improvements (e.g., "reducing diagnosis time from weeks to hours")
-                            - Add accuracy improvements (e.g., "improving detection accuracy by 20-30%")
+                        Generate a complete LinkedIn post following this structure:
+                        """
+                            elif word_count > 350:
+                                prompt_text = f"""
+                        CRITICAL: Your previous response was {word_count} words, exceeding the 350-word limit.
+                        Please condense to 250-350 words while maintaining key insights.
 
-                            3. DISCUSS implications in detail:
-                            - Impact on radiologists and pathologists
-                            - Changes in hospital workflows
-                            - Training requirements for medical staff
-                            - Cost implications for healthcare systems
+                        CONTENT: {summary_text}
 
-                            4. ADDRESS challenges and concerns:
-                            - Data privacy and security issues
-                            - Need for regulatory approval
-                            - Integration with existing systems
-                            - Patient acceptance and trust
-
-                            5. PROVIDE strategic recommendations:
-                            - Steps healthcare organizations should take now
-                            - Investment priorities
-                            - Partnership opportunities
-
-                            EXAMPLE of proper length - your CORE INSIGHT section alone should be around 150-200 words like this:
-
-                            "The healthcare industry stands at a pivotal moment. UC San Diego's breakthrough in AI-powered cancer diagnosis represents more than technological advancement—it signals a fundamental shift in how we approach medical decision-making. A significant 73% of executives believe AI will fundamentally reshape their industry within the next 3 years [PwC Global AI Study, 2024], and cancer diagnosis is proving to be the proving ground.
-
-                            Consider the implications: traditional pathology reviews that take 3-5 days can now be completed in hours, with accuracy rates exceeding human specialists in specific cancer types like melanoma and breast cancer. This isn't just about speed—it's about access. Rural hospitals without specialist oncologists can now provide expert-level diagnosis, democratizing quality healthcare.
-
-                            However, this transformation demands strategic preparation. Healthcare organizations must invest in data infrastructure, retrain staff, and navigate complex regulatory frameworks. The question isn't whether AI will transform medical diagnosis—it's whether healthcare leaders will proactively shape this transformation or react to it."
-
-                            NOW generate a complete LinkedIn post with this level of detail in the CORE INSIGHT section.
-
-                            {prompt_text}
-                            """
+                        Make it concise but comprehensive, removing redundancy while keeping core value.
+                        """
 
                         elif word_count > 350:
                             prompt_text += f"""
@@ -406,83 +388,89 @@ Please condense while maintaining all key elements. Focus on:
                 prompt_text = self.post_prompts.build_engagement_optimized_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
                 )
-            else: # Default or use original style
+            elif style == "humorous":
+                # Use the generic build_post_prompt but with humorous style for system prompt
+                prompt_text = self.post_prompts.build_post_prompt(
+                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style="humorous"
+                )
+            else: # Default case
                 effective_style = style or original_draft.generation_metadata.get("style_used", "professional_thought_leader")
                 prompt_text = self.post_prompts.build_post_prompt(
                     summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=effective_style
                 )
 
-            # 🔧 VALIDATION FIX: Use validation retry instead of direct AI service call
-            try:
-                # Create AI service wrapper for validation retry
-                llm_wrapper = self.post_prompts.create_ai_service_wrapper(self.ai_service)
-                
-                # Generate with validation retry - ensures 250-350 words!
-                validated_post_json = await self.post_prompts.generate_post_with_retry(
-                    prompt=prompt_text,
-                    llm_function=llm_wrapper,
-                    max_retries=3,
-                    apply_dwell_time_optimization=True
-                )
-                
-                logger.info(f"✅ Regeneration validation passed: {len(validated_post_json['content'].split())} words")
-                
-                # Extract validated content
-                post_content = validated_post_json["content"]
-                post_hashtags = validated_post_json["hashtags"]
-                
-                # Create response data for consistency
-                class MockPostDraftResponse:
-                    def __init__(self, content, hashtags):
-                        self.content = content
-                        self.hashtags = hashtags
-                        self.model_used = "openai:gpt-3.5-turbo-0125"
-                        self.cost = 0.001
-                        self.tokens_used = len(content.split()) * 1.3
-                        self.processing_time = 2.0
-                
-                post_draft_response_data = MockPostDraftResponse(post_content, post_hashtags)
-
-            except Exception as validation_error:
-                logger.error(f"🚨 Regeneration validation failed: {validation_error}")
-                
-                # Fall back to simple validation approach
-                for attempt in range(3):
-                    try:
-                        generation_request = PostGenerationRequest(
-                            summary=summary_text,
-                            tone_profile=tone_profile,
-                            user_examples=user_post_examples,
-                            style=style or "professional_thought_leader",
-                            num_variations=1,
-                            custom_prompt_text=prompt_text
-                        )
+            # Use the enhanced prompt with better word count guidance and direct AI service call
+            for attempt in range(3):
+                try:
+                    generation_request = PostGenerationRequest(
+                        summary=summary_text,
+                        tone_profile=tone_profile,
+                        user_examples=user_post_examples,
+                        style=style or "professional_thought_leader",
+                        num_variations=1,
+                        custom_prompt_text=prompt_text
+                    )
+                    
+                    post_draft_response_data = await self.ai_service.generate_post_draft(generation_request)
+                    
+                    # Check word count
+                    content = post_draft_response_data.content
+                    word_count = len(content.split())
+                    
+                    if 250 <= word_count <= 350:
+                        logger.info(f"✅ Regeneration validation passed: {word_count} words")
+                        break
+                    else:
+                        logger.warning(f"❌ Regeneration validation failed: {word_count} words (need 250-350)")
                         
-                        post_draft_response_data = await self.ai_service.generate_post_draft(generation_request)
-                        
-                        # Check word count
-                        content = post_draft_response_data.content
-                        word_count = len(content.split())
-                        
-                        if 250 <= word_count <= 350:
-                            logger.info(f"✅ Regeneration validation passed: {word_count} words")
-                            break
-                        else:
-                            logger.warning(f"❌ Regeneration validation failed: {word_count} words (need 250-350)")
-                            
-                            if attempt < 2:
-                                prompt_text += f"\n\nIMPORTANT: The previous attempt generated only {word_count} words. Please ensure your response is between 250-350 words as required. Expand the content with more detailed analysis and insights."
-                                continue
-                            else:
-                                logger.error(f"🚨 All regeneration attempts failed. Final word count: {word_count}")
-                                break
-                                
-                    except Exception as e:
                         if attempt < 2:
-                            logger.warning(f"Regeneration attempt {attempt + 1} failed: {e}")
+                            # Enhanced prompt for next attempt with very specific instructions
+                            if word_count < 250:
+                                words_needed = 250 - word_count
+                                prompt_text = f"""
+            URGENT: You MUST write exactly 250-350 words. Your previous attempt was only {word_count} words.
+
+            REQUIRED WORD COUNT: 250-350 words (you need {words_needed} more words minimum)
+
+            MANDATORY STRUCTURE:
+            - HOOK (30-40 words): Attention-grabbing opener with question or statistic
+            - CONTEXT (60-80 words): Background information and setup
+            - CORE INSIGHT (140-180 words): Deep analysis with examples, implications, and detailed explanations  
+            - CONNECT (30-40 words): Direct question to audience
+
+            CONTENT TO EXPAND: {summary_text}
+            STYLE: {style or 'professional_thought_leader'}
+
+            You MUST reach 250-350 words by:
+            1. Adding specific examples and case studies in Core Insight
+            2. Including detailed implications and analysis
+            3. Using transitional phrases and connecting sentences
+            4. Expanding on the background context
+
+            Generate a complete LinkedIn post with the exact word count requirement:
+            """
+                            elif word_count > 350:
+                                prompt_text = f"""
+            CRITICAL: Your response was {word_count} words, exceeding 350-word limit.
+            Condense to 250-350 words while keeping all key insights.
+
+            CONTENT: {summary_text}
+            STYLE: {style or 'professional'}
+
+            Remove redundancy, tighten language, but maintain value and structure.
+            Target exactly 280-320 words for optimal length.
+            """
                             continue
                         else:
-                            raise ContentGenerationError(f"Failed to regenerate post after {attempt + 1} attempts: {str(e)}")
+                            logger.error(f"🚨 All regeneration attempts failed. Final word count: {word_count}")
+                            break
+                            
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning(f"Regeneration attempt {attempt + 1} failed: {e}")
+                        continue
+                    else:
+                        raise ContentGenerationError(f"Failed to regenerate after {attempt + 1} attempts: {str(e)}")
 
             # Update the draft with validated content
             update_data: Dict[str, Any] = {

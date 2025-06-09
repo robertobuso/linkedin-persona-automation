@@ -323,49 +323,6 @@ async def delete_draft(
                 detail=f"Failed to delete draft: {str(e)}"
             )
 
-
-@router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
-async def regenerate_draft_endpoint(
-    draft_id: UUID,
-    style: Optional[str] = Query("professional_thought_leader", description="Style for regeneration (e.g., professional_thought_leader, storytelling, educational, thought_provoking)"), # Updated default and description
-    preserve_hashtags: bool = Query(False, description="Preserve existing hashtags"),
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> PostDraftResponse:
-    """Regenerate a post draft with new content."""
-    async with db_session_cm as session:
-        draft_repo = PostDraftRepository(session)
-        draft = await draft_repo.get_by_id(draft_id)
-
-        if not draft:
-            raise ContentNotFoundError(f"Draft {draft_id} not found")
-
-        if draft.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
-        try:
-            content_generator = ContentGenerator(session) # Corrected class name
-            regenerated_draft = await content_generator.regenerate_post_draft(
-                draft_id=draft_id,
-                user_id=current_user.id, # Pass user_id
-                style=style,
-                preserve_hashtags=preserve_hashtags
-            )
-
-            if regenerated_draft:
-                return PostDraftResponse.model_validate(regenerated_draft)
-            else:
-                # This case might indicate an issue within regenerate_post_draft if it can return None
-                logger.error(f"Regeneration returned None for draft {draft_id}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to regenerate draft")
-        except Exception as e:
-            logger.error(f"Failed to regenerate draft {draft_id}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to regenerate draft: {str(e)}"
-            )
-
-
 @router.get("/stats/summary", response_model=DraftStatsResponse)
 async def get_draft_stats(
     current_user: User = Depends(get_current_active_user),
