@@ -307,19 +307,12 @@ class APIClient {
   }
 
   async getAllUserDrafts(): Promise<DraftWithContent[]> {
-    const response = await this.client.get('/drafts/all')
+    const response = await this.client.get('/drafts')
     return response.data
   }
 
-  async generateDraft(contentId: string): Promise<PostDraft> {
+  async generateDraftFromContent(contentItemId: string, toneStyle: string = 'professional'): Promise<DraftWithContent> {
     const response = await this.client.post('/drafts', {
-      content_item_id: contentId,
-    })
-    return response.data
-  }
-
-  async generateDraftFromContent(contentItemId: string, toneStyle: string): Promise<DraftWithContent> {
-    const response = await this.client.post('/drafts/generate-from-content', {
       content_item_id: contentItemId,
       tone_style: toneStyle
     })
@@ -343,11 +336,14 @@ class APIClient {
   }
 
   async regenerateDraft(draftId: string, options: {
-    tone_style?: string
+    tone_style: string
     preserve_hashtags?: boolean
   }): Promise<DraftWithContent> {
-    const response = await this.client.post(`/drafts/${draftId}/regenerate`, options)
-    return response.data.draft || response.data
+    const response = await this.client.post(`/drafts/${draftId}/regenerate`, {
+      tone_style: options.tone_style,
+      preserve_hashtags: options.preserve_hashtags || false
+    })
+    return response.data
   }
 
   async batchGenerateDrafts(options: {
@@ -362,12 +358,8 @@ class APIClient {
   }
 
   async getToneStyles(): Promise<Array<{value: string, label: string, description: string}>> {
-    return [
-      { value: 'professional', label: 'Professional', description: 'Formal, business-focused tone' },
-      { value: 'conversational', label: 'Conversational', description: 'Friendly, approachable tone' },
-      { value: 'storytelling', label: 'Storytelling', description: 'Narrative-driven, engaging tone' },
-      { value: 'humorous', label: 'Humorous', description: 'Light-hearted, entertaining tone' }
-    ]
+    const response = await this.client.get('/drafts/tone-styles')
+    return response.data
   }
 
   // AI Recommendations

@@ -111,10 +111,6 @@ class ContentGenerator:
                 prompt_text = self.post_prompts.build_storytelling_post_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
                 )
-            elif style == "thought_leadership":
-                prompt_text = self.post_prompts.build_thought_leadership_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
             elif style == "educational":
                 prompt_text = self.post_prompts.build_educational_post_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
@@ -123,9 +119,39 @@ class ContentGenerator:
                 prompt_text = self.post_prompts.build_engagement_optimized_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
                 )
-            else: # Default or "professional_thought_leader"
+            elif style == "motivational":
+                prompt_text = self.post_prompts.build_motivational_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "casual":
+                prompt_text = self.post_prompts.build_casual_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "thought_provoking":
+                prompt_text = self.post_prompts.build_thought_provoking_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "humorous":
                 prompt_text = self.post_prompts.build_post_prompt(
-                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=style
+                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style="humorous"
+                )
+            elif style == "professional":
+                prompt_text = self.post_prompts.build_professional_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "conversational":
+                prompt_text = self.post_prompts.build_conversational_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "professional_thought_leader":
+                prompt_text = self.post_prompts.build_professional_thought_leader_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            else:
+                # Default fallback — possibly uses the last known style from metadata
+                effective_style = style or original_draft.generation_metadata.get("style_used", "professional_thought_leader")
+                prompt_text = self.post_prompts.build_post_prompt(
+                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=effective_style
                 )
 
             # 🔧 KEY FIX: Use validation retry instead of direct AI service call
@@ -372,12 +398,9 @@ Please condense while maintaining all key elements. Focus on:
 
             # Build prompt based on style
             prompt_text: str
+
             if style == "storytelling":
                 prompt_text = self.post_prompts.build_storytelling_post_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "thought_leadership":
-                prompt_text = self.post_prompts.build_thought_leadership_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
                 )
             elif style == "educational":
@@ -388,16 +411,41 @@ Please condense while maintaining all key elements. Focus on:
                 prompt_text = self.post_prompts.build_engagement_optimized_prompt(
                     summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
                 )
+            elif style == "motivational":
+                prompt_text = self.post_prompts.build_motivational_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "casual":
+                prompt_text = self.post_prompts.build_casual_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "thought_provoking":
+                prompt_text = self.post_prompts.build_thought_provoking_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
             elif style == "humorous":
-                # Use the generic build_post_prompt but with humorous style for system prompt
                 prompt_text = self.post_prompts.build_post_prompt(
                     summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style="humorous"
                 )
-            else: # Default case
+            elif style == "professional":
+                prompt_text = self.post_prompts.build_professional_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "conversational":
+                prompt_text = self.post_prompts.build_conversational_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            elif style == "professional_thought_leader":
+                prompt_text = self.post_prompts.build_professional_thought_leader_prompt(
+                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
+                )
+            else:
+                # Default fallback — possibly uses the last known style from metadata
                 effective_style = style or original_draft.generation_metadata.get("style_used", "professional_thought_leader")
                 prompt_text = self.post_prompts.build_post_prompt(
                     summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=effective_style
                 )
+
 
             # Use the enhanced prompt with better word count guidance and direct AI service call
             for attempt in range(3):
@@ -428,38 +476,69 @@ Please condense while maintaining all key elements. Focus on:
                             if word_count < 250:
                                 words_needed = 250 - word_count
                                 prompt_text = f"""
-            URGENT: You MUST write exactly 250-350 words. Your previous attempt was only {word_count} words.
+                            🚨 CRITICAL FAILURE: Your previous response was ONLY {word_count} words. 
+                            LinkedIn posts MUST be 250-350 words to perform well. You need {words_needed} MORE words minimum.
 
-            REQUIRED WORD COUNT: 250-350 words (you need {words_needed} more words minimum)
+                            MANDATORY REQUIREMENTS:
+                            ✅ Word count: 250-350 words (COUNT EACH WORD)
+                            ✅ Structure: Hook + Core Insight + Connect
+                            ✅ Style: {style or 'professional'}
 
-            MANDATORY STRUCTURE:
-            - HOOK (30-40 words): Attention-grabbing opener with question or statistic
-            - CONTEXT (60-80 words): Background information and setup
-            - CORE INSIGHT (140-180 words): Deep analysis with examples, implications, and detailed explanations  
-            - CONNECT (30-40 words): Direct question to audience
+                            CONTENT TO EXPAND INTO 250-350 WORDS:
+                            {summary_text}
 
-            CONTENT TO EXPAND: {summary_text}
-            STYLE: {style or 'professional_thought_leader'}
+                            REQUIRED STRUCTURE FOR PROPER LENGTH:
 
-            You MUST reach 250-350 words by:
-            1. Adding specific examples and case studies in Core Insight
-            2. Including detailed implications and analysis
-            3. Using transitional phrases and connecting sentences
-            4. Expanding on the background context
+                            1. HOOK (25-40 words):
+                            - Start with compelling opener
+                            - Use statistic, question, or bold statement
+                            
+                            2. CORE INSIGHT (180-250 words) - THIS IS WHERE YOU ADD LENGTH:
+                            - Detailed analysis of the topic
+                            - Specific examples and case studies
+                            - Industry context and implications  
+                            - Supporting data and trends
+                            - Multiple perspectives or angles
+                            - Practical applications
+                            - Future implications
+                            - Personal observations or experiences
+                            
+                            3. CONNECT (30-50 words):
+                            - Thoughtful question for audience
+                            - Clear call-to-action
 
-            Generate a complete LinkedIn post with the exact word count requirement:
-            """
+                            HOW TO REACH 250-350 WORDS:
+                            - Add specific examples: "For instance, when [company] implemented [solution], they saw [result]"
+                            - Include industry context: "This trend is particularly relevant in [industry] because..."
+                            - Expand on implications: "The broader implications suggest that..."
+                            - Add supporting details: "Consider these key factors: [list 3-4 detailed points]"
+                            - Include contrasting viewpoints: "While some argue [X], the data shows [Y]"
+                            - Add forward-looking analysis: "Looking ahead, this could mean..."
+
+                            WRITE THE COMPLETE 250-350 WORD POST NOW.
+                            COUNT YOUR WORDS BEFORE RESPONDING.
+                            """
+
                             elif word_count > 350:
+                                excess_words = word_count - 350
                                 prompt_text = f"""
-            CRITICAL: Your response was {word_count} words, exceeding 350-word limit.
-            Condense to 250-350 words while keeping all key insights.
+                            🚨 CRITICAL: Your response was {word_count} words, which is {excess_words} words TOO LONG.
+                            Maximum allowed: 350 words. You must cut {excess_words} words while keeping all key insights.
 
-            CONTENT: {summary_text}
-            STYLE: {style or 'professional'}
+                            CONTENT: {summary_text}
+                            STYLE: {style or 'professional'}
 
-            Remove redundancy, tighten language, but maintain value and structure.
-            Target exactly 280-320 words for optimal length.
-            """
+                            EDITING INSTRUCTIONS:
+                            - Keep the Hook (25-40 words)
+                            - Trim Core Insight to 200-250 words by removing redundancy
+                            - Keep Connect section (30-50 words) 
+                            - Remove filler words and redundant phrases
+                            - Consolidate similar points
+                            - Keep the most impactful examples and data
+
+                            TARGET: 280-320 words (safe middle range)
+                            REWRITE THE POST TO EXACTLY 250-350 WORDS.
+                            """
                             continue
                         else:
                             logger.error(f"🚨 All regeneration attempts failed. Final word count: {word_count}")

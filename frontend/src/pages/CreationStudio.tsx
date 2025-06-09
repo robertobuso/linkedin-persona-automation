@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { FunnelIcon, PlusIcon } from '@heroicons/react/24/outline'
-import { useBatchGenerateDrafts } from '@/hooks/useEnhancedDrafts'
+import { useBatchGenerateDrafts } from '@/hooks/useDrafts'
 import { notify } from '@/stores/uiStore'
 
 export default function CreationStudio() {

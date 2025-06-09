@@ -5,9 +5,9 @@ import { notify } from '@/stores/uiStore'
 // Get all drafts
 export function useDrafts() {
   return useQuery({
-    queryKey: ['drafts', 'all'],
+    queryKey: ['drafts'],
     queryFn: () => api.getAllUserDrafts(),
-    refetchInterval: 30 * 1000, // Refresh every 30 seconds for real-time updates
+    refetchInterval: 30 * 1000,
     refetchOnWindowFocus: true,
   })
 }
@@ -22,11 +22,8 @@ export function useGenerateDraft() {
       tone_style: string 
     }) => api.generateDraftFromContent(content_item_id, tone_style),
     onSuccess: (newDraft) => {
-      // Update drafts list immediately
       queryClient.invalidateQueries({ queryKey: ['drafts'] })
-      // Also update content list to show draft_generated status
       queryClient.invalidateQueries({ queryKey: ['content'] })
-      
       return newDraft
     },
     onError: (error: any) => {
@@ -46,7 +43,7 @@ export function useRegenerateDraft() {
   return useMutation({
     mutationFn: ({ draftId, options }: { 
       draftId: string
-      options: { tone_style?: string; preserve_hashtags?: boolean }
+      options: { tone_style: string; preserve_hashtags?: boolean }
     }) => api.regenerateDraft(draftId, options),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drafts'] })
@@ -127,70 +124,6 @@ export function useToneStyles() {
   return useQuery({
     queryKey: ['tone-styles'],
     queryFn: () => api.getToneStyles(),
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
   })
 }
-
-// frontend/src/hooks/useAIRecommendations.ts - UPDATED VERSION
-import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
-
-export function useAIRecommendations() {
-  return useQuery({
-    queryKey: ['ai-recommendations'],
-    queryFn: () => api.getAIRecommendations({
-      includeConfidence: true,
-      includeReasoning: true,
-      limit: 10
-    }),
-    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
-    staleTime: 2 * 60 * 1000, // Consider fresh for 2 minutes
-  })
-}
-
-export function usePersonaMetrics(days: number = 30) {
-  return useQuery({
-    queryKey: ['persona-metrics', days],
-    queryFn: () => api.getPersonaMetrics(days),
-    refetchInterval: 15 * 60 * 1000, // Refresh every 15 minutes
-  })
-}
-
-export function useDraftRecommendations() {
-  return useQuery({
-    queryKey: ['draft-recommendations'],
-    queryFn: () => api.getDraftRecommendations(),
-    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
-  })
-}
-
-export function useEngagementPrediction(draftId: string) {
-  return useQuery({
-    queryKey: ['engagement-prediction', draftId],
-    queryFn: () => api.getEngagementPrediction(draftId),
-    enabled: !!draftId,
-    staleTime: 10 * 60 * 1000, // Predictions valid for 10 minutes
-  })
-}
-
-export function useTodaysContent() {
-  return useQuery({
-    queryKey: ['todays-content'],
-    queryFn: () => api.getContentByMode('ai-selected'),
-    refetchInterval: 30 * 60 * 1000, // Refresh every 30 minutes
-  })
-}
-
-export function useEngagementQueue() {
-  return useQuery({
-    queryKey: ['engagement-queue'],
-    queryFn: () => api.getCommentOpportunities({
-      limit: 20,
-      status: 'pending'
-    }),
-    refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
-  })
-}
-
-// Export the consolidated useDrafts for compatibility
-// export { useDrafts } from './useDrafts'

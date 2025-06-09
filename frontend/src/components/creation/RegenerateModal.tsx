@@ -51,7 +51,7 @@ export function RegenerateModal({
       icon: '😄'
     },
     {
-      value: 'thought_leadership',
+      value: 'professional_thought_leader',
       label: 'Thought Leadership',
       description: 'Expert insights and industry analysis',
       icon: '🧠'

@@ -14,8 +14,12 @@ from enum import Enum
 class WritingStyleEnum(str, Enum):
     """Enumeration of writing styles."""
     PROFESSIONAL = "professional"
-    CASUAL = "casual"
-    FORMAL = "formal"
+    CONVERSATIONAL = "conversational"
+    STORYTELLING = "storytelling"
+    HUMOROUS = "humorous"
+    PROFESSIONAL_THOUGHT_LEADER = "professional_thought_leader"
+    EDUCATIONAL = "educational"
+    ENGAGEMENT_OPTIMIZED = "engagement_optimized"
 
 
 class ToneEnum(str, Enum):
@@ -27,6 +31,17 @@ class ToneEnum(str, Enum):
     CONVERSATIONAL = "conversational"
 
 
+class ToneStyle(str, Enum):
+    """Available tone styles for draft generation."""
+    PROFESSIONAL = "professional"
+    CONVERSATIONAL = "conversational"
+    STORYTELLING = "storytelling"
+    HUMOROUS = "humorous"
+    THOUGHT_LEADERSHIP = "thought_leadership"
+    EDUCATIONAL = "educational"
+    ENGAGEMENT_OPTIMIZED = "engagement_optimized"
+
+
 class PostStyleEnum(str, Enum):
     """Enumeration of post styles."""
     PROFESSIONAL = "professional"
@@ -36,6 +51,7 @@ class PostStyleEnum(str, Enum):
     MOTIVATIONAL = "motivational"
     STORYTELLING = "storytelling"
     PROFESSIONAL_THOUGHT_LEADER = "professional_thought_leader"
+    HUMOROUS = "humorous"
 
 
 class EngagementTypeEnum(str, Enum):
@@ -47,7 +63,6 @@ class EngagementTypeEnum(str, Enum):
     INSIGHTFUL = "insightful"
 
 
-# Tone Profile Schema
 class ToneProfile(BaseModel):
     """Schema for user tone profile."""
     writing_style: WritingStyleEnum = Field(WritingStyleEnum.PROFESSIONAL, description="Overall writing style")
@@ -120,7 +135,7 @@ class PostGenerationRequest(BaseModel):
     """Schema for LinkedIn post generation requests."""
     summary: str = Field(..., min_length=50, description="Content summary to generate post from")
     tone_profile: ToneProfile = Field(..., description="User tone profile")
-    user_examples: Optional[List[str]] = Field("professional_thought_leader", description="User's historical posts for style matching")
+    user_examples: Optional[List[str]] = Field(default=None, description="User's historical posts for style matching")
     style: Optional[PostStyleEnum] = Field(PostStyleEnum.PROFESSIONAL_THOUGHT_LEADER, description="Desired post style")
     num_variations: Optional[int] = Field(3, ge=1, le=5, description="Number of variations to generate")
     include_hashtags: Optional[bool] = Field(True, description="Whether to include hashtags")

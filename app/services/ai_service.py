@@ -258,7 +258,7 @@ class AIService:
             # Invoke LLM
             response_text, metrics = await self._invoke_llm_with_fallback(
                 messages=messages,
-                max_tokens=300,
+                max_tokens=600,
                 temperature=0.3
             )
 
@@ -316,14 +316,14 @@ class AIService:
                         logger.debug(f"Built prompt using style '{request.style}' for variation {i+1}")
                     
                     messages = [
-                        SystemMessage(content=self.post_prompts.get_system_prompt()),
+                        SystemMessage(content=self.post_prompts.get_system_prompt(request.style)),
                         HumanMessage(content=prompt_to_use)
                     ]
 
                     temperature = 0.7 + (i * 0.1) if (request.num_variations or 1) > 1 else 0.7
                     response_text, metrics = await self._invoke_llm_with_fallback(
                         messages=messages,
-                        max_tokens=500, # Or request.max_tokens if you add it to PostGenerationRequest
+                        max_tokens=1500, # Or request.max_tokens if you add it to PostGenerationRequest
                         temperature=temperature
                     )
 

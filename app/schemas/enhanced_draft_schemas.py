@@ -14,6 +14,11 @@ class ToneStyle(str, Enum):
     CONVERSATIONAL = "conversational"
     STORYTELLING = "storytelling"
     HUMOROUS = "humorous"
+    PROFESSIONAL_THOUGHT_LEADER = "professional_thought_leader"
+    EDUCATIONAL = "educational"
+    ENGAGEMENT_OPTIMIZED = "engagement_optimized"
+
+
 
 class DraftRegenerateRequest(BaseModel):
     """Request model for draft regeneration."""

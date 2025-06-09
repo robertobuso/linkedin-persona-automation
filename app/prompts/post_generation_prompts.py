@@ -71,8 +71,12 @@ except ImportError:
     # Placeholder for PostStyleEnum if not available
     class PostStyleEnum:
         PROFESSIONAL = "professional"
-        CASUAL = "casual"
-        THOUGHT_PROVOKING = "thought_provoking"
+        CONVERSATIONAL = "conversational"
+        STORYTELLING = "storytelling"
+        HUMOROUS = "humorous"
+        PROFESSIONAL_THOUGHT_LEADER = "professional_thought_leader"
+        EDUCATIONAL = "educational"
+        ENGAGEMENT_OPTIMIZED = "engagement_optimized"
 
 # Try to import YAML, fall back to no YAML support if not available
 try:
@@ -647,7 +651,6 @@ Pay close attention to word count, hashtag count, and the structure of 'call_to_
         # Base mission and goals
         base_mission = """You are an expert LinkedIn content strategist. Your mission is to craft compelling, engaging posts optimized for LinkedIn's 2025 feed."""
         
-        # Style-specific adaptations
         style_adaptations = {
             "humorous": {
                 "mission": "You specialize in professional humor that entertains while delivering value, making content memorable and shareable.",
@@ -685,14 +688,59 @@ Pay close attention to word count, hashtag count, and the structure of 'call_to_
                 ],
                 "tone": "Knowledgeable teacher: Share expertise in a clear, structured way that empowers readers to take action."
             },
-            "thought_leadership": {
-                "mission": "You establish thought leadership through expert insights, industry analysis, and forward-thinking perspectives.",
+            "professional": {
+                "mission": "You deliver clear, credible, and authoritative content that reflects professional expertise.",
                 "characteristics": [
-                    "Expert authority: Demonstrate deep industry knowledge and strategic thinking.",
-                    "Forward-thinking: Offer predictions, trends analysis, and strategic insights.",
-                    "Influential perspective: Challenge conventional thinking with well-supported arguments."
+                    "Polished & Clear: Maintain a formal and articulate tone with no fluff.",
+                    "Credible & Reliable: Base claims on evidence, data, or established principles.",
+                    "Authoritative: Speak with confidence and command of your subject."
                 ],
-                "tone": "Authoritative expert: Share insights as a recognized leader in your field with confidence and strategic vision."
+                "tone": "Professional and articulate: Deliver trustworthy insights with clarity and authority."
+            },
+            "conversational": {
+                "mission": "You communicate ideas in a relaxed, friendly tone as if speaking directly to the reader.",
+                "characteristics": [
+                    "Natural Flow: Use contractions and casual phrasing.",
+                    "Direct Engagement: Ask questions and speak to the reader personally.",
+                    "Warmth: Foster a tone of accessibility and openness."
+                ],
+                "tone": "Relaxed and friendly: Make the reader feel like they're having a chat with a peer."
+            },
+            "professional_thought_leader": {
+                "mission": "You combine expert analysis with polished delivery to shape discourse in your industry.",
+                "characteristics": [
+                    "Well-Researched: Support insights with data, citations, and real-world examples.",
+                    "Polished & Strategic: Balance credibility with high-level thinking.",
+                    "Vision-Oriented: Emphasize impact and future trends."
+                ],
+                "tone": "Strategic and polished: Influence readers with confident, visionary content."
+            },
+            "engagement_optimized": {
+                "mission": "You drive interaction by crafting content that sparks conversation and encourages response.",
+                "characteristics": [
+                    "Hook-Driven: Lead with bold, curious, or emotional openers.",
+                    "Response-Oriented: Ask questions or call for opinions.",
+                    "Snackable & Viral: Keep it digestible, punchy, and highly shareable."
+                ],
+                "tone": "Dynamic and punchy: Encourage reactions, comments, and sharing."
+            },
+            "motivational": {
+                "mission": "You inspire action through encouragement, positivity, and empowering language.",
+                "characteristics": [
+                    "Uplifting Tone: Use positive, hopeful, and energetic phrasing.",
+                    "Empower the Reader: Focus on what’s possible and achievable.",
+                    "Call to Action: Encourage forward momentum and confidence."
+                ],
+                "tone": "Empowering and uplifting: Motivate the reader to believe and act."
+            },
+            "thought_provoking": {
+                "mission": "You challenge assumptions and stimulate deeper thinking with bold, reflective insights.",
+                "characteristics": [
+                    "Challenging & Reflective: Pose meaningful questions or reframe issues.",
+                    "Analytical Depth: Go beyond surface-level ideas.",
+                    "Intellectually Bold: Present unexpected angles or contradictions."
+                ],
+                "tone": "Bold and reflective: Make the reader pause, think, and reconsider what they know."
             }
         }
         
@@ -713,36 +761,49 @@ Pay close attention to word count, hashtag count, and the structure of 'call_to_
 
         return f"""{mission_text}
 
-    Your primary goals are:
-    1. To generate posts that follow the "Hook -> Value -> Connect" arc, grab attention quickly, deliver fresh insight, and invite focused discussion.
-    2. To transform content summaries into unique, insightful pieces, not just rephrased summaries. Emphasize data-backed insights and non-obvious angles. If a specific statistic is provided, it MUST be incorporated.
-    3. To identify and highlight core tensions, contrarian viewpoints, or provocative angles within the source material.
-    4. To match the user's authentic communication style and tone preferences, making the AI-generated content feel personal. Vary diction based on personality traits as guided.
-    5. To optimize posts for LinkedIn by incorporating 2-3 relevant hashtags, encouraging focused engagement with a single role-aligned question, and ensuring professional value.
+Your primary goals are:
+1. To generate posts that follow the "Hook -> Value -> Connect" arc, grab attention quickly, deliver fresh insight, and invite focused discussion.
+2. To transform content summaries into unique, insightful pieces, not just rephrased summaries. Emphasize data-backed insights and non-obvious angles. If a specific statistic is provided, it MUST be incorporated.
+3. To identify and highlight core tensions, contrarian viewpoints, or provocative angles within the source material.
+4. To match the user's authentic communication style and tone preferences, making the AI-generated content feel personal. Vary diction based on personality traits as guided.
+5. To optimize posts for LinkedIn by incorporating 2-3 relevant hashtags, encouraging focused engagement with a single role-aligned question, and ensuring professional value.
 
-    Key Characteristics of Your Output:
-    {characteristics_text}
-    - Hook-driven: Starts strong to capture attention immediately.
+Key Characteristics of Your Output:
+{characteristics_text}
+- Hook-driven: Starts strong to capture attention immediately.
 
-    Style & Tone:
-    {tone_instruction}
+Style & Tone:
+{tone_instruction}
 
-    LinkedIn Best Practices (2025 Algorithm):
-    - Adhere to Hook-Value-Connect structure.
-    - Aim for posts around 250-350 words for optimal dwell-time.
-    - Use line breaks and white space for excellent readability.
-    - Strategically include 2-3 highly relevant hashtags (ONLY in the 'hashtags' array).
-    - End with a single, focused, role-aligned question to invite discussion.
-    - Attribute sources if distinctive phrasing/imagery is reused, or when including a provided stat with a source.
+🚨 CRITICAL WORD COUNT REQUIREMENT 🚨
+YOU MUST GENERATE EXACTLY 250-350 WORDS. THIS IS NON-NEGOTIABLE.
+- Posts under 250 words will be REJECTED
+- Posts over 350 words will be REJECTED  
+- Count your words carefully before responding
+- If unsure, err on the side of 280-320 words (safe middle range)
 
-    Output Format:
-    Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
-    {{
-    "content": "The complete LinkedIn post text, crafted with the above principles. Adhere to 250-350 words. **IMPORTANT: Do NOT include hashtags within this content string itself.** They should ONLY be in the 'hashtags' array. If instructed to include a general source line, it should be the last line of this content.",
-    "hashtags": ["#relevantHashtag1", "#relevantHashtag2"],
-    "engagement_hooks": ["The single, focused, role-aligned question used in the post, matching the 'call_to_action'."],
-    "call_to_action": "The single, focused, role-aligned question from the post's CONNECT section. Must end with a single question mark."
-    }}"""
+LinkedIn Best Practices (2025 Algorithm):
+- Adhere to Hook-Value-Connect structure.
+- MANDATORY: Generate EXACTLY 250-350 words for optimal engagement.
+- Use line breaks and white space for excellent readability.
+- Strategically include 2-3 highly relevant hashtags (ONLY in the 'hashtags' array).
+- End with a single, focused, role-aligned question to invite discussion.
+- Attribute sources if distinctive phrasing/imagery is reused, or when including a provided stat with a source.
+
+WORD COUNT STRUCTURE GUIDE:
+- Hook: 20-40 words (attention-grabbing opener)
+- Core Insight: 180-250 words (detailed analysis, examples, implications)  
+- Connect: 30-50 words (engagement question and call-to-action)
+Total: 250-350 words EXACTLY
+
+Output Format:
+Your response MUST be a valid JSON object ONLY, with no other text or markdown formatting surrounding it. The JSON object must have this exact structure:
+{{
+"content": "The complete LinkedIn post text, crafted with the above principles. MUST BE 250-350 WORDS EXACTLY. **IMPORTANT: Do NOT include hashtags within this content string itself.** They should ONLY be in the 'hashtags' array. If instructed to include a general source line, it should be the last line of this content.",
+"hashtags": ["#relevantHashtag1", "#relevantHashtag2"],
+"engagement_hooks": ["The single, focused, role-aligned question used in the post, matching the 'call_to_action'."],
+"call_to_action": "The single, focused, role-aligned question from the post's CONNECT section. Must end with a single question mark."
+}}"""
 
     # BACKWARDS COMPATIBLE METHODS - these maintain the old signatures
 
@@ -826,7 +887,7 @@ STORYTELLING APPROACH (Integrate this into the HVC structure, especially the COR
             logger.error(f"Error building storytelling prompt: {e}")
             return self._build_fallback_prompt(summary, user_examples, tone_profile, "storytelling")
 
-    def build_thought_leadership_prompt(
+    def build_professional_thought_leader_prompt(
         self,
         summary: str,
         tone_profile: ToneProfile,
@@ -1317,7 +1378,6 @@ Style: Professional Thought Leader (Conversational & Insightful)
         def wrapper(prompt: str) -> str:
             """Wrapper function that calls AI service and returns raw response."""
             try:
-                # Import here to avoid circular imports
                 from langchain.schema import SystemMessage, HumanMessage
                 import asyncio
 
@@ -1326,7 +1386,6 @@ Style: Professional Thought Leader (Conversational & Insightful)
                     HumanMessage(content=prompt)
                 ]
 
-                # 🔧 FIX: Run the async method in a sync context
                 async def _async_call():
                     return await ai_service_instance._invoke_llm_with_fallback(
                         messages=messages,
@@ -1334,22 +1393,14 @@ Style: Professional Thought Leader (Conversational & Insightful)
                         temperature=0.5
                     )
 
-                # Run the async function and get the result
-                loop = None
+                # Simplified async handling
                 try:
                     loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # If we're already in an async context, we need to use a different approach
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(asyncio.run, _async_call())
-                            response_text, _ = future.result()
-                    else:
-                        response_text, _ = loop.run_until_complete(_async_call())
                 except RuntimeError:
-                    # No event loop running, safe to use asyncio.run
-                    response_text, _ = asyncio.run(_async_call())
-
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                response_text, _ = loop.run_until_complete(_async_call())
                 return response_text
 
             except Exception as e:
@@ -1440,7 +1491,7 @@ if __name__ == '__main__':
 
     for prompt_type_method_name in [
         "build_storytelling_post_prompt",
-        "build_thought_leadership_prompt",
+        "build_professional_thought_leader_prompt",
         "build_educational_post_prompt",
         "build_engagement_optimized_prompt"
     ]:
@@ -1448,7 +1499,7 @@ if __name__ == '__main__':
             method_to_call = getattr(prompter, prompt_type_method_name)
             if prompt_type_method_name == "build_storytelling_post_prompt":
                 prompt = method_to_call(summary=mock_summary, tone_profile=mock_tone, user_examples=mock_examples, story_angle="lesson_learned")
-            elif prompt_type_method_name == "build_thought_leadership_prompt":
+            elif prompt_type_method_name == "build_professional_thought_leader_prompt":
                  prompt = method_to_call(summary=mock_summary, tone_profile=mock_tone, user_examples=mock_examples, industry_focus="Renewable Energy")
             elif prompt_type_method_name == "build_educational_post_prompt":
                  prompt = method_to_call(summary=mock_summary, tone_profile=mock_tone, user_examples=mock_examples, learning_format="tips")

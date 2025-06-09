@@ -95,57 +95,47 @@ async def get_drafts(
 
 @router.post("", response_model=PostDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_draft(
-    draft_data: PostDraftCreate,
+    content_item_id: UUID = Body(..., embed=True),
+    tone_style: Optional[str] = Body("professional", embed=True),
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
-    try:
-        content_item_uuid = UUID(draft_data.content_item_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid content_item_id format. Must be a valid UUID."
-        )
-
+    """Generate a draft from content with tone selection."""
     async with db_session_cm as session:
-        content_repo = ContentItemRepository(session) # content_repo is an instance of ContentItemRepository
+        content_repo = ContentItemRepository(session)
         
-        # --- MODIFICATION HERE ---
         # Fetch content_item with its 'source' relationship eagerly loaded
         stmt = (
             select(ContentItem)
-            .options(selectinload(ContentItem.source)) # Eager load the 'source' relationship
-            .where(ContentItem.id == content_item_uuid)
+            .options(selectinload(ContentItem.source))
+            .where(ContentItem.id == content_item_id)
         )
         result = await session.execute(stmt)
         content_item = result.scalar_one_or_none()
-        # --- END MODIFICATION ---
 
         if not content_item:
-            raise ContentNotFoundError(f"Content item {content_item_uuid} not found")
+            raise ContentNotFoundError(f"Content item {content_item_id} not found")
 
-        # Now content_item.source should be loaded, so accessing content_item.source.user_id is safe
-        # The hasattr check is still good practice.
         if not hasattr(content_item, 'source') or not content_item.source or content_item.source.user_id != current_user.id:
-             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
 
         try:
-            content_generator = ContentGenerator(session) # Assuming this is the correct service
+            content_generator = ContentGenerator(session)
             draft = await content_generator.generate_post_from_content(
-                content_item_id=content_item_uuid, # or pass content_item object directly
+                content_item_id=content_item_id,
                 user_id=current_user.id,
-                style=draft_data.style if hasattr(draft_data, 'style') and draft_data.style else "professional_thought_leader",
-                num_variations=draft_data.num_variations if hasattr(draft_data, 'num_variations') else 1
+                style=tone_style,
+                num_variations=1
             )
             return PostDraftResponse.model_validate(draft)
 
         except Exception as e:
-            logger.error(f"Failed to create draft for content_item {content_item_uuid}: {e}", exc_info=True)
+            logger.error(f"Failed to create draft for content_item {content_item_id}: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create draft: {str(e)}"
             )
-
+        
 
 @router.get("/{draft_id}", response_model=PostDraftResponse)
 async def get_draft(
@@ -323,6 +313,94 @@ async def delete_draft(
                 detail=f"Failed to delete draft: {str(e)}"
             )
 
+@router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
+async def regenerate_draft_with_tone(
+    draft_id: UUID,
+    tone_style: str = Body(..., embed=True),
+    preserve_hashtags: bool = Body(False, embed=True),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Regenerate a draft with specified tone style."""
+    async with db_session_cm as session:
+        try:
+            draft_repo = PostDraftRepository(session)
+            content_generator = ContentGenerator(session)
+            
+            # Get and validate draft
+            draft = await draft_repo.get_by_id(draft_id)
+            if not draft:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Draft not found"
+                )
+            
+            if draft.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+            
+            # Regenerate with new tone
+            regenerated_draft = await content_generator.regenerate_post_draft(
+                draft_id=draft_id,
+                user_id=current_user.id,
+                style=tone_style,
+                preserve_hashtags=preserve_hashtags
+            )
+            
+            return PostDraftResponse.model_validate(regenerated_draft)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to regenerate draft {draft_id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to regenerate draft"
+            )
+
+@router.get("/tone-styles", response_model=List[Dict[str, str]])
+async def get_available_tone_styles() -> List[Dict[str, str]]:
+    """Get available tone styles for draft generation."""
+    return [
+        {
+            "value": "professional",
+            "label": "Professional",
+            "description": "Formal, business-focused tone"
+        },
+        {
+            "value": "conversational",
+            "label": "Conversational", 
+            "description": "Friendly, approachable tone"
+        },
+        {
+            "value": "storytelling",
+            "label": "Storytelling",
+            "description": "Narrative-driven, engaging tone"
+        },
+        {
+            "value": "humorous",
+            "label": "Humorous",
+            "description": "Light-hearted, entertaining tone"
+        },
+        {
+            "value": "thought_leadership",
+            "label": "Thought Leadership",
+            "description": "Expert insights and industry analysis"
+        },
+        {
+            "value": "educational",
+            "label": "Educational",
+            "description": "Teaching and instructional content"
+        },
+        {
+            "value": "engagement_optimized",
+            "label": "Engagement Optimized",
+            "description": "Designed to maximize interaction"
+        }
+    ]
+
 @router.get("/stats/summary", response_model=DraftStatsResponse)
 async def get_draft_stats(
     current_user: User = Depends(get_current_active_user),
@@ -340,7 +418,6 @@ async def get_draft_stats(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get draft stats: {str(e)}"
             )
-
 
 @router.post("/batch-generate", response_model=List[PostDraftResponse])
 async def batch_generate_drafts_endpoint(
@@ -369,194 +446,6 @@ async def batch_generate_drafts_endpoint(
                 detail=f"Failed to batch generate drafts: {str(e)}"
             )
         
-@router.post("/{draft_id}/regenerate", response_model=DraftRegenerateResponse)
-async def regenerate_draft_with_tone(
-    draft_id: UUID,
-    request: DraftRegenerateRequest,
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> DraftRegenerateResponse:
-    """
-    Regenerate a draft with specified tone style.
-    
-    Args:
-        draft_id: Draft ID to regenerate
-        request: Regeneration request with tone style
-        current_user: Current authenticated user
-    
-    Returns:
-        Regenerated draft response
-    """
-    async with db_session_cm as session:
-        try:
-            draft_repo = PostDraftRepository(session)
-            content_generator = ContentGenerator(session)
-            
-            # Get and validate draft
-            draft = await draft_repo.get_by_id(draft_id)
-            if not draft:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Draft not found"
-                )
-            
-            if draft.user_id != current_user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied"
-                )
-            
-            # Regenerate with new tone
-            regenerated_draft = await content_generator.regenerate_post_draft(
-                draft_id=draft_id,
-                user_id=current_user.id,
-                style=request.tone_style.value,
-                preserve_hashtags=request.preserve_hashtags
-            )
-            
-            return DraftRegenerateResponse(
-                draft=DraftWithContent.from_orm(regenerated_draft),
-                tone_style=request.tone_style,
-                regenerated_at=regenerated_draft.updated_at,
-                success=True,
-                message="Draft regenerated successfully"
-            )
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to regenerate draft {draft_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to regenerate draft"
-            )
-
-@router.get("/all", response_model=List[DraftWithContent])
-async def get_all_user_drafts(
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> List[DraftWithContent]:
-    """
-    Get all drafts for the current user ordered by updated_at DESC.
-    
-    Returns:
-        List of all user drafts with full content
-    """
-    async with db_session_cm as session:
-        try:
-            draft_repo = PostDraftRepository(session)
-            
-            # Get all drafts for user, ordered by updated_at DESC
-            all_drafts = await draft_repo.list_with_pagination(
-                page=1,
-                page_size=1000,  # Large limit to get all drafts
-                order_by="updated_at",
-                order_desc=True,
-                user_id=current_user.id
-            )
-            
-            return [DraftWithContent.from_orm(draft) for draft in all_drafts["items"]]
-            
-        except Exception as e:
-            logger.error(f"Failed to get all drafts for user {current_user.id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to get drafts"
-            )
-
-@router.post("/generate-from-content", response_model=DraftWithContent, status_code=status.HTTP_201_CREATED)
-async def generate_draft_from_content(
-    content_item_id: UUID = Body(..., embed=True),
-    tone_style: ToneStyle = Body(ToneStyle.PROFESSIONAL, embed=True),
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> DraftWithContent:
-    """
-    Generate a draft from content with tone selection and duplicate prevention.
-    
-    Args:
-        content_item_id: Content item to generate draft from
-        tone_style: Tone style for generation
-        current_user: Current authenticated user
-    
-    Returns:
-        Generated draft with full content
-    """
-    async with db_session_cm as session:
-        try:
-            content_repo = ContentItemRepository(session)
-            content_generator = ContentGenerator(session)
-            
-            # Check if content item exists and belongs to user
-            content_item = await content_repo.get_by_id(content_item_id)
-            if not content_item:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Content item not found"
-                )
-            
-            # Check if draft already generated (duplicate prevention)
-            if hasattr(content_item, 'draft_generated') and content_item.draft_generated:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Draft already generated for this content item"
-                )
-            
-            # Verify user has access to this content item through sources
-            # (Assuming content items are accessible through user's sources)
-            
-            # Generate draft
-            new_draft = await content_generator.generate_post_from_content(
-                content_item_id=content_item_id,
-                user_id=current_user.id,
-                style=tone_style.value
-            )
-            
-            # Mark content item as having draft generated
-            await content_repo.update(content_item_id, draft_generated=True)
-            
-            return DraftWithContent.from_orm(new_draft)
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to generate draft from content {content_item_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to generate draft"
-            )
-
-@router.get("/tone-styles", response_model=List[Dict[str, str]])
-async def get_available_tone_styles() -> List[Dict[str, str]]:
-    """
-    Get available tone styles for draft generation.
-    
-    Returns:
-        List of available tone styles with descriptions
-    """
-    return [
-        {
-            "value": ToneStyle.PROFESSIONAL.value,
-            "label": "Professional",
-            "description": "Formal, business-focused tone"
-        },
-        {
-            "value": ToneStyle.CONVERSATIONAL.value,
-            "label": "Conversational",
-            "description": "Friendly, approachable tone"
-        },
-        {
-            "value": ToneStyle.STORYTELLING.value,
-            "label": "Storytelling",
-            "description": "Narrative-driven, engaging tone"
-        },
-        {
-            "value": ToneStyle.HUMOROUS.value,
-            "label": "Humorous",
-            "description": "Light-hearted, entertaining tone"
-        }
-    ]
-
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_draft_statistics(
     current_user: User = Depends(get_current_active_user),
