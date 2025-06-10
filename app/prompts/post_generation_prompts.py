@@ -176,6 +176,43 @@ class PostGenerationPrompts:
         # For now, stats library is loaded at init and can be manually reloaded.
         # If hot-reload for stats is needed, a similar watcher can be added for self.stats_library_path
 
+    def build_post_prompt(
+            self,
+            summary: str,
+            user_examples: List[str],
+            tone_profile: ToneProfile,
+            style: str = "professional_thought_leader",
+            # NEW OPTIONAL PARAMETERS for enhanced functionality
+            audience_role: str = "industry peers",
+            include_sources: bool = False
+        ) -> str:
+            """Build LinkedIn post generation prompt. BACKWARDS COMPATIBLE."""
+            try:
+                # Get industry for stat injection
+                stat_industry = None
+                if hasattr(tone_profile, 'industry_focus') and tone_profile.industry_focus:
+                    stat_industry = tone_profile.industry_focus[0]
+
+                # Try to inject relevant statistics
+                stat_list = self.inject_stats_ranked(summary, stat_industry, count=1)
+                fetched_stat = stat_list[0]["text"] if stat_list else None
+
+                # Build the enhanced prompt using new internal methods
+                base_sections = self._build_base_prompt_sections(
+                    summary, tone_profile, user_examples, audience_role, style
+                )
+                specific_requirements: List[str] = []
+
+                return self._construct_full_prompt(
+                    base_sections, specific_requirements, include_sources,
+                    fetched_stat=fetched_stat
+                )
+
+            except Exception as e:
+                logger.error(f"Error building post prompt: {e}")
+                # Fallback to a basic prompt if enhanced version fails
+                return self._build_fallback_prompt(summary, user_examples, tone_profile, style)
+
     def _load_stats_library(self) -> List[Dict[str, Any]]:
         """Loads statistics from the specified JSON file."""
         if not os.path.exists(self.stats_library_path):
