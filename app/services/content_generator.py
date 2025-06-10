@@ -106,53 +106,12 @@ class ContentGenerator:
                 summary_text = content_item.title # Fallback summary
 
             # Build the specific prompt based on style
-            prompt_text: str
-            if style == "storytelling":
-                prompt_text = self.post_prompts.build_storytelling_post_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "educational":
-                prompt_text = self.post_prompts.build_educational_post_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "engagement_optimized":
-                prompt_text = self.post_prompts.build_engagement_optimized_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "motivational":
-                prompt_text = self.post_prompts.build_motivational_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "casual":
-                prompt_text = self.post_prompts.build_casual_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "thought_provoking":
-                prompt_text = self.post_prompts.build_thought_provoking_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "humorous":
-                prompt_text = self.post_prompts.build_post_prompt(
-                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style="humorous"
-                )
-            elif style == "professional":
-                prompt_text = self.post_prompts.build_professional_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "conversational":
-                prompt_text = self.post_prompts.build_conversational_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "professional_thought_leader":
-                prompt_text = self.post_prompts.build_professional_thought_leader_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            else:
-                # Default fallback — possibly uses the last known style from metadata
-                effective_style = style or original_draft.generation_metadata.get("style_used", "professional_thought_leader")
-                prompt_text = self.post_prompts.build_post_prompt(
-                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=effective_style
-                )
+            prompt_text = self._build_style_specific_prompt(
+                style=style,  # or just 'style' in generate_post_from_content
+                summary=summary_text,
+                tone_profile=tone_profile,
+                user_examples=user_post_examples
+            )
 
             # 🔧 KEY FIX: Use validation retry instead of direct AI service call
             for attempt in range(3):
@@ -397,54 +356,12 @@ Please condense while maintaining all key elements. Focus on:
                 summary_text = content_item.title
 
             # Build prompt based on style
-            prompt_text: str
-
-            if style == "storytelling":
-                prompt_text = self.post_prompts.build_storytelling_post_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "educational":
-                prompt_text = self.post_prompts.build_educational_post_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "engagement_optimized":
-                prompt_text = self.post_prompts.build_engagement_optimized_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "motivational":
-                prompt_text = self.post_prompts.build_motivational_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "casual":
-                prompt_text = self.post_prompts.build_casual_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "thought_provoking":
-                prompt_text = self.post_prompts.build_thought_provoking_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "humorous":
-                prompt_text = self.post_prompts.build_post_prompt(
-                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style="humorous"
-                )
-            elif style == "professional":
-                prompt_text = self.post_prompts.build_professional_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "conversational":
-                prompt_text = self.post_prompts.build_conversational_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            elif style == "professional_thought_leader":
-                prompt_text = self.post_prompts.build_professional_thought_leader_prompt(
-                    summary=summary_text, tone_profile=tone_profile, user_examples=user_post_examples
-                )
-            else:
-                # Default fallback — possibly uses the last known style from metadata
-                effective_style = style or original_draft.generation_metadata.get("style_used", "professional_thought_leader")
-                prompt_text = self.post_prompts.build_post_prompt(
-                    summary=summary_text, user_examples=user_post_examples, tone_profile=tone_profile, style=effective_style
-                )
+            prompt_text = self._build_style_specific_prompt(
+                style=style,  # or just 'style' in generate_post_from_content
+                summary=summary_text,
+                tone_profile=tone_profile,
+                user_examples=user_post_examples
+            )
 
 
             # Use the enhanced prompt with better word count guidance and direct AI service call
@@ -631,6 +548,32 @@ Please condense while maintaining all key elements. Focus on:
         
         return await self.ai_service.generate_post_draft(post_request)
     
+    def _build_style_specific_prompt(
+        self,
+        style: str,
+        summary: str,
+        tone_profile: ToneProfile,
+        user_examples: List[str]
+    ) -> str:
+        """Build style-specific prompt using the unified system."""
+        try:
+            # ✅ Use the unified build_post_prompt for ALL styles
+            return self.post_prompts.build_post_prompt(
+                summary=summary,
+                user_examples=user_examples,
+                tone_profile=tone_profile,
+                style=style  # This works for ANY style in your style_adaptations dict
+            )
+        except Exception as e:
+            logger.error(f"Error building prompt for style '{style}': {e}")
+            # Fallback to default style
+            return self.post_prompts.build_post_prompt(
+                summary=summary,
+                user_examples=user_examples,
+                tone_profile=tone_profile,
+                style="professional_thought_leader"
+            )
+        
     async def _validate_post_content(self, content: str, hashtags: List[str]) -> Dict[str, Any]:
         """Validate and clean post content for LinkedIn."""
         # LinkedIn character limit

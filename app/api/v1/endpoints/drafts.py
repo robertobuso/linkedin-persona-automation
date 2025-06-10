@@ -1,44 +1,47 @@
 """
-Draft management endpoints for LinkedIn Presence Automation Application.
-
-Provides endpoints for managing post drafts, scheduling, publishing,
-and draft lifecycle operations.
+Draft management endpoints - FIXED VERSION
 """
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from uuid import UUID # Import UUID
-import logging # For logging
+from uuid import UUID
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select # Make sure this is imported
-from sqlalchemy.orm import selectinload, joinedload # Import eager loading options
-from app.models.content import ContentItem, ContentSource
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload, joinedload
 
-from app.core.security import get_current_active_user # Ensure this is correctly defined and working
-from app.database.connection import get_db_session, AsyncSessionContextManager # Your @asynccontextmanager decorated dependency
+from app.core.security import get_current_active_user
+from app.database.connection import get_db_session, AsyncSessionContextManager
 from app.repositories.content_repository import PostDraftRepository, ContentItemRepository
-from app.services.content_generator import ContentGenerator # Ensure this service is correctly implemented
-from app.schemas.api_schemas import ( # Ensure these schemas are correctly defined and ORM compatible
-    PostDraftCreate,
+from app.services.content_generator import ContentGenerator, ContentGenerationError
+from app.schemas.api_schemas import (
     PostDraftResponse,
-    PostDraftUpdate,
     PublishRequest,
     PublishResponse,
-    DraftStatsResponse
-)
-from app.schemas.enhanced_draft_schemas import (
-    DraftRegenerateRequest,
-    DraftWithContent,
-    ToneStyle,
-    DraftRegenerateResponse
+    DraftStatsResponse,
+    PostDraftUpdate
 )
 from app.models.user import User
-from app.models.content import DraftStatus # Ensure this Enum is defined
-from app.utils.exceptions import ContentNotFoundError, ValidationError # Ensure these are defined
+from app.models.content import ContentItem, DraftStatus
+from app.utils.exceptions import ContentNotFoundError, ValidationError
 from app.services.linkedin_api_service import LinkedInAPIService
 from app.services.linkedin_oauth_service import LinkedInOAuthService
+
+# 🔧 NEW: Proper Pydantic request models instead of Body(embed=True)
+from pydantic import BaseModel, Field
+
+class DraftCreateRequest(BaseModel):
+    """Request model for creating drafts."""
+    content_item_id: str = Field(..., description="Content item ID")
+    tone_style: str = Field("professional_thought_leader", description="Generation style")
+    num_variations: int = Field(1, ge=1, le=5, description="Number of variations")
+
+class DraftRegenerateRequest(BaseModel):
+    """Request model for regenerating drafts."""
+    tone_style: str = Field(..., description="New tone style")
+    preserve_hashtags: bool = Field(False, description="Keep existing hashtags")
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -50,92 +53,191 @@ async def get_drafts(
     limit: int = Query(20, ge=1, le=100, description="Number of drafts to return"),
     offset: int = Query(0, ge=0, description="Number of drafts to skip"),
     current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session) # Renamed for clarity
-) -> List[PostDraftResponse]: # Specific return type
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> List[PostDraftResponse]:
     """Get user's post drafts."""
-    async with db_session_cm as session: # Use async with
-        draft_repo = PostDraftRepository(session) # Pass actual session
-        drafts_list: List[Any] # Define type for drafts_list
+    async with db_session_cm as session:
+        draft_repo = PostDraftRepository(session)
+        
+        try:
+            if status_filter:
+                try:
+                    draft_status_enum = DraftStatus(status_filter)
+                    drafts_list = await draft_repo.get_drafts_by_status(
+                        user_id=current_user.id,
+                        status=draft_status_enum,
+                        limit=limit,
+                        offset=offset
+                    )
+                except ValueError:
+                    raise ValidationError(f"Invalid status filter: {status_filter}")
+            else:
+                all_user_drafts = await draft_repo.find_by(user_id=current_user.id) # Example if find_by exists
+                drafts_list = all_user_drafts[offset : offset + limit]
 
-        if status_filter:
-            try:
-                draft_status_enum = DraftStatus(status_filter) # Validate against Enum
-                # Assuming get_drafts_by_status returns a list of ORM objects
-                drafts_list = await draft_repo.get_drafts_by_status(
-                    user_id=current_user.id,
-                    status=draft_status_enum,
-                    limit=limit,
-                    offset=offset
-                )
-            except ValueError:
-                raise ValidationError(f"Invalid status filter: {status_filter}")
-        else:
-            # Assuming list_with_pagination correctly filters by user_id or you add it
-            # The original code filtered *after* pagination, which is inefficient.
-            # It's better if list_with_pagination can take a user_id filter.
-            # For now, assuming it fetches all and then we filter (less ideal).
-            # OR, if your PostDraftRepository.list_with_pagination can filter by user_id:
-            # pagination_result = await draft_repo.list_with_pagination(
-            #     user_id=current_user.id, # Add user_id filter here
-            #     page=(offset // limit) + 1,
-            #     page_size=limit
-            # )
-            # drafts_list = pagination_result["items"]
-
-            # Fallback to fetching all for user then manually handling pagination (less efficient for DB)
-            # This assumes PostDraftRepository doesn't have a get_all_by_user method with offset/limit.
-            # Ideally, the repository method should handle user filtering and pagination.
-            all_user_drafts = await draft_repo.find_by(user_id=current_user.id) # Example if find_by exists
-            drafts_list = all_user_drafts[offset : offset + limit]
-
-
-        # Use model_validate for Pydantic v2
-        return [PostDraftResponse.model_validate(draft) for draft in drafts_list]
+            return [PostDraftResponse.model_validate(draft) for draft in drafts_list]
+            
+        except Exception as e:
+            logger.error(f"Failed to get drafts for user {current_user.id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve drafts"
+            )
 
 
 @router.post("", response_model=PostDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_draft(
-    content_item_id: UUID = Body(..., embed=True),
-    tone_style: Optional[str] = Body("professional", embed=True),
+    request: DraftCreateRequest,  # 🔧 FIX: Use Pydantic model instead of Body(embed=True)
     current_user: User = Depends(get_current_active_user),
     db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
 ) -> PostDraftResponse:
     """Generate a draft from content with tone selection."""
     async with db_session_cm as session:
-        content_repo = ContentItemRepository(session)
-        
-        # Fetch content_item with its 'source' relationship eagerly loaded
-        stmt = (
-            select(ContentItem)
-            .options(selectinload(ContentItem.source))
-            .where(ContentItem.id == content_item_id)
-        )
-        result = await session.execute(stmt)
-        content_item = result.scalar_one_or_none()
-
-        if not content_item:
-            raise ContentNotFoundError(f"Content item {content_item_id} not found")
-
-        if not hasattr(content_item, 'source') or not content_item.source or content_item.source.user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
-
         try:
+            content_repo = ContentItemRepository(session)
+            
+            # Convert string UUID to UUID object
+            try:
+                content_item_id = UUID(request.content_item_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid content item ID format"
+                )
+            
+            # Fetch content_item with its 'source' relationship eagerly loaded
+            stmt = (
+                select(ContentItem)
+                .options(selectinload(ContentItem.source))
+                .where(ContentItem.id == content_item_id)
+            )
+            result = await session.execute(stmt)
+            content_item = result.scalar_one_or_none()
+
+            if not content_item:
+                raise ContentNotFoundError(f"Content item {content_item_id} not found")
+
+            # Check access permissions
+            if not hasattr(content_item, 'source') or not content_item.source or content_item.source.user_id != current_user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to content item's source")
+
+            logger.info(f"Creating draft from content {content_item_id} with style '{request.tone_style}' for user {current_user.id}")
+
+            # Generate draft using ContentGenerator
             content_generator = ContentGenerator(session)
             draft = await content_generator.generate_post_from_content(
                 content_item_id=content_item_id,
                 user_id=current_user.id,
-                style=tone_style,
-                num_variations=1
+                style=request.tone_style,
+                num_variations=request.num_variations
             )
+            
+            logger.info(f"Successfully created draft {draft.id} from content {content_item_id}")
             return PostDraftResponse.model_validate(draft)
 
+        except ContentGenerationError as cge:
+            logger.error(f"Content generation failed for content {request.content_item_id}: {str(cge)}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Failed to generate draft: {str(cge)}"
+            )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Failed to create draft for content_item {content_item_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error creating draft: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create draft: {str(e)}"
+                detail="An unexpected error occurred during draft creation"
             )
-        
+
+
+@router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
+async def regenerate_draft_with_tone(
+    draft_id: UUID,
+    request: DraftRegenerateRequest,  # 🔧 FIX: Use Pydantic model
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> PostDraftResponse:
+    """Regenerate a draft with specified tone style."""
+    async with db_session_cm as session:
+        try:
+            draft_repo = PostDraftRepository(session)
+            
+            # Get and validate draft
+            draft = await draft_repo.get_by_id(draft_id)
+            if not draft:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Draft not found"
+                )
+            
+            if draft.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied"
+                )
+            
+            logger.info(f"Regenerating draft {draft_id} with style '{request.tone_style}' for user {current_user.id}")
+            
+            # Regenerate using ContentGenerator
+            content_generator = ContentGenerator(session)
+            regenerated_draft = await content_generator.regenerate_post_draft(
+                draft_id=draft_id,
+                user_id=current_user.id,
+                style=request.tone_style,
+                preserve_hashtags=request.preserve_hashtags
+            )
+            
+            logger.info(f"Successfully regenerated draft {draft_id}")
+            return PostDraftResponse.model_validate(regenerated_draft)
+                
+        except ContentGenerationError as cge:
+            logger.error(f"Content generation error for draft {draft_id}: {str(cge)}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Regeneration failed: {str(cge)}"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error regenerating draft {draft_id}: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred during regeneration"
+            )
+
+
+@router.post("/batch-generate", response_model=List[PostDraftResponse])
+async def batch_generate_drafts_endpoint(
+    max_posts: int = Query(5, ge=1, le=10, description="Maximum posts to generate"),
+    min_relevance_score: int = Query(70, ge=0, le=100, description="Minimum relevance score"),
+    style: str = Query("professional_thought_leader", description="Generation style"),
+    current_user: User = Depends(get_current_active_user),
+    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
+) -> List[PostDraftResponse]:
+    """Generate multiple drafts from high-relevance content."""
+    async with db_session_cm as session:
+        try:
+            logger.info(f"Starting batch generation for user {current_user.id}: max_posts={max_posts}, style={style}")
+            
+            content_generator = ContentGenerator(session)
+            drafts = await content_generator.batch_generate_posts(
+                user_id=current_user.id,
+                max_posts=max_posts,
+                min_relevance_score=min_relevance_score,
+                style=style
+            )
+            
+            logger.info(f"Successfully generated {len(drafts)} drafts for user {current_user.id}")
+            return [PostDraftResponse.model_validate(draft) for draft in drafts]
+            
+        except Exception as e:
+            logger.error(f"Failed to batch generate drafts for user {current_user.id}: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to batch generate drafts: {str(e)}"
+            )
+
 
 @router.get("/{draft_id}", response_model=PostDraftResponse)
 async def get_draft(
@@ -312,54 +414,7 @@ async def delete_draft(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete draft: {str(e)}"
             )
-
-@router.post("/{draft_id}/regenerate", response_model=PostDraftResponse)
-async def regenerate_draft_with_tone(
-    draft_id: UUID,
-    tone_style: str = Body(..., embed=True),
-    preserve_hashtags: bool = Body(False, embed=True),
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> PostDraftResponse:
-    """Regenerate a draft with specified tone style."""
-    async with db_session_cm as session:
-        try:
-            draft_repo = PostDraftRepository(session)
-            content_generator = ContentGenerator(session)
-            
-            # Get and validate draft
-            draft = await draft_repo.get_by_id(draft_id)
-            if not draft:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Draft not found"
-                )
-            
-            if draft.user_id != current_user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied"
-                )
-            
-            # Regenerate with new tone
-            regenerated_draft = await content_generator.regenerate_post_draft(
-                draft_id=draft_id,
-                user_id=current_user.id,
-                style=tone_style,
-                preserve_hashtags=preserve_hashtags
-            )
-            
-            return PostDraftResponse.model_validate(regenerated_draft)
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to regenerate draft {draft_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to regenerate draft"
-            )
-
+        
 @router.get("/tone-styles", response_model=List[Dict[str, str]])
 async def get_available_tone_styles() -> List[Dict[str, str]]:
     """Get available tone styles for draft generation."""
@@ -385,7 +440,7 @@ async def get_available_tone_styles() -> List[Dict[str, str]]:
             "description": "Light-hearted, entertaining tone"
         },
         {
-            "value": "thought_leadership",
+            "value": "professional_thought_leader",
             "label": "Thought Leadership",
             "description": "Expert insights and industry analysis"
         },
@@ -398,6 +453,21 @@ async def get_available_tone_styles() -> List[Dict[str, str]]:
             "value": "engagement_optimized",
             "label": "Engagement Optimized",
             "description": "Designed to maximize interaction"
+        },
+        {
+            "value": "motivational",
+            "label": "Motivational",
+            "description": "Inspiring and empowering content"
+        },
+        {
+            "value": "casual",
+            "label": "Casual",
+            "description": "Relaxed and informal tone"
+        },
+        {
+            "value": "thought_provoking",
+            "label": "Thought Provoking",
+            "description": "Challenging conventional thinking"
         }
     ]
 
@@ -419,33 +489,6 @@ async def get_draft_stats(
                 detail=f"Failed to get draft stats: {str(e)}"
             )
 
-@router.post("/batch-generate", response_model=List[PostDraftResponse])
-async def batch_generate_drafts_endpoint(
-    max_posts: int = Query(5, ge=1, le=10, description="Maximum posts to generate"),
-    min_relevance_score: int = Query(70, ge=0, le=100, description="Minimum relevance score"),
-    # Add style parameter to the endpoint
-    style: Optional[str] = Query("professional_thought_leader", description="Style for batch generation (e.g., professional_thought_leader, storytelling)"),
-    current_user: User = Depends(get_current_active_user),
-    db_session_cm: AsyncSessionContextManager = Depends(get_db_session)
-) -> List[PostDraftResponse]:
-    """Generate multiple drafts from high-relevance content."""
-    async with db_session_cm as session:
-        try:
-            content_generator = ContentGenerator(session) # Corrected class name
-            drafts = await content_generator.batch_generate_posts(
-                user_id=current_user.id,
-                max_posts=max_posts,
-                min_relevance_score=min_relevance_score,
-                style=style # Pass the style
-            )
-            return [PostDraftResponse.model_validate(draft) for draft in drafts]
-        except Exception as e:
-            logger.error(f"Failed to batch generate drafts for user {current_user.id}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to batch generate drafts: {str(e)}"
-            )
-        
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_draft_statistics(
     current_user: User = Depends(get_current_active_user),
